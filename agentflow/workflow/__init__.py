@@ -1,1 +1,5 @@
-"""workflow —— 低代码工作流：自研轻量 StateGraph（Node / 边 / 条件边）。"""
+"""workflow —— 低代码状态图引擎：StateGraph + START/END + 条件边（不依赖 LangGraph）。"""
+
+from agentflow.workflow.graph import END, START, StateGraph
+
+__all__ = ["END", "START", "StateGraph"]
