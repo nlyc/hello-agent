@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentflow"
+version = "1.0.0"
+description = "自研智能体框架 v1.0：三种范式 + 低代码工作流 + 可替换 Model Layer + 工具热插拔/记忆/Trace"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.0",
+    "python-dotenv>=1.0",
+    "openai>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+include = ["agentflow*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
