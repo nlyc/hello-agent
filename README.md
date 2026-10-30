@@ -31,7 +31,7 @@ py -3.14 -m pip install -e .
 ## 里程碑
 
 - [x] M0 脚手架：包结构 + pyproject + pytest 空跑
-- [ ] M1 core + llm
+- [x] M1 core + llm：Message/Config/Agent 基类 + BaseLLM/公司中转站/模型注册表
 - [ ] M2 tools（热插拔）
 - [ ] M3 agents（三范式）
 - [ ] M4 memory + trace
