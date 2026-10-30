@@ -1,4 +1,28 @@
-"""测试替身：假 OpenAI 客户端，用于不联网测试 LLM 层。"""
+"""测试替身：假 OpenAI 客户端与可编排 LLM，用于不联网测试 LLM 层与 Agent 循环。"""
+
+from agentflow.llm.base import BaseLLM
+
+
+class ScriptedLLM(BaseLLM):
+    """按队列顺序返回预设回复的 BaseLLM，并记录每次调用的入参，供 Agent 循环测试。"""
+
+    def __init__(self, responses=None, default=""):
+        self._responses = list(responses or [])
+        self.default = default
+        self.calls: list[dict] = []
+
+    def chat(self, messages, *, temperature=None, json_mode=False, tools=None):
+        self.calls.append(
+            {
+                "messages": list(messages),
+                "temperature": temperature,
+                "json_mode": json_mode,
+                "tools": tools,
+            }
+        )
+        if not self._responses:
+            return self.default
+        return self._responses.pop(0)
 
 
 class FakeMessage:
