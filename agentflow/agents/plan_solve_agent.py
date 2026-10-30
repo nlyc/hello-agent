@@ -46,14 +46,16 @@ class PlanAndSolveAgent(Agent):
         system_prompt: Optional[str] = None,
         config=None,
         custom_prompts: Optional[dict] = None,
+        memory=None,
+        tracer=None,
     ):
-        super().__init__(name, llm, system_prompt, config)
+        super().__init__(name, llm, system_prompt, config, memory, tracer)
         self._templates = {"planner": PLANNER_TEMPLATE, "executor": EXECUTOR_TEMPLATE}
         if custom_prompts:
             self._templates.update(custom_prompts)
 
-    def _chat(self, prompt: str) -> str:
-        return self.llm.chat([{"role": "user", "content": prompt}]).strip()
+    def _chat(self, prompt: str, step: int = 0) -> str:
+        return self._call_llm([{"role": "user", "content": prompt}], step=step).strip()
 
     def _execute(self, input_text: str, **kwargs) -> str:
         plan = self._plan(input_text)
@@ -63,7 +65,7 @@ class PlanAndSolveAgent(Agent):
 
     def _plan(self, question: str) -> list[str]:
         prompt = self._templates["planner"].format(question=question)
-        response = self._chat(prompt)
+        response = self._chat(prompt, step=1)
         try:
             plan_str = response.split("```python")[1].split("```")[0].strip()
             plan = ast.literal_eval(plan_str)
@@ -78,6 +80,6 @@ class PlanAndSolveAgent(Agent):
             prompt = self._templates["executor"].format(
                 question=question, plan=plan, history=history or "无", current_step=step
             )
-            result = self._chat(prompt)
+            result = self._chat(prompt, step=i + 2)
             history += f"步骤 {i+1}: {step}\n结果: {result}\n\n"
         return result

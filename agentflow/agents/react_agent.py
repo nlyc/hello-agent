@@ -84,8 +84,10 @@ class ReActAgent(Agent):
         system_prompt: Optional[str] = None,
         config=None,
         custom_prompt: Optional[str] = None,
+        memory=None,
+        tracer=None,
     ):
-        super().__init__(name, llm, system_prompt, config)
+        super().__init__(name, llm, system_prompt, config, memory, tracer)
         self.tools = tools
         self.custom_prompt = custom_prompt
 
@@ -102,8 +104,8 @@ class ReActAgent(Agent):
             {"role": "user", "content": input_text},
         ]
         max_steps = self.config.agent.max_steps
-        for _ in range(max_steps):
-            output = self.llm.chat(messages).strip()
+        for step_no in range(1, max_steps + 1):
+            output = self._call_llm(messages, step=step_no).strip()
             output = _truncate_extra_pairs(output)
             messages.append({"role": "assistant", "content": output})
 
@@ -147,6 +149,11 @@ class ReActAgent(Agent):
                 observation = self.tools.execute(tool_name, params)
             except ToolError as e:
                 observation = f"错误: {e}"
+            self._emit(
+                "tool",
+                step=step_no,
+                data={"tool": tool_name, "params": params, "output": observation},
+            )
             messages.append({"role": "user", "content": f"Observation: {observation}"})
 
         raise AgentError(f"ReAct 已达最大步数 {max_steps} 仍未得到最终答案")

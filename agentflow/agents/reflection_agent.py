@@ -52,8 +52,10 @@ class ReflectionAgent(Agent):
         role: str = "资深专家",
         reviewer_role: str = "极其严格的评审专家",
         custom_prompts: Optional[dict] = None,
+        memory=None,
+        tracer=None,
     ):
-        super().__init__(name, llm, system_prompt, config)
+        super().__init__(name, llm, system_prompt, config, memory, tracer)
         self.max_iterations = max_iterations
         self.role = role
         self.reviewer_role = reviewer_role
@@ -66,27 +68,34 @@ class ReflectionAgent(Agent):
             self._templates.update(custom_prompts)
         self._records: list[dict] = []
 
-    def _chat(self, prompt: str) -> str:
-        return self.llm.chat([{"role": "user", "content": prompt}]).strip()
+    def _chat(self, prompt: str, step: int = 0) -> str:
+        return self._call_llm([{"role": "user", "content": prompt}], step=step).strip()
 
     def _execute(self, input_text: str, **kwargs) -> str:
         self._records = []
-        result = self._chat(self._templates["initial"].format(role=self.role, task=input_text))
+        step = 1
+        result = self._chat(
+            self._templates["initial"].format(role=self.role, task=input_text), step=step
+        )
         self._records.append({"type": "execution", "content": result})
 
         for _ in range(self.max_iterations):
+            step += 1
             feedback = self._chat(
                 self._templates["reflect"].format(
                     reviewer_role=self.reviewer_role, task=input_text, result=result
-                )
+                ),
+                step=step,
             )
             self._records.append({"type": "reflection", "content": feedback})
             if "无需改进" in feedback:
                 break
+            step += 1
             result = self._chat(
                 self._templates["refine"].format(
                     role=self.role, task=input_text, last_result=result, feedback=feedback
-                )
+                ),
+                step=step,
             )
             self._records.append({"type": "execution", "content": result})
         return result
