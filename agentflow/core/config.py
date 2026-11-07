@@ -22,11 +22,24 @@ class AgentConfig(BaseModel):
     max_tool_iterations: int = 3
 
 
+class MemoryConfig(BaseModel):
+    """记忆层配置。默认开启，使用本地 SQLite，零额外依赖。"""
+
+    enabled: bool = True
+    store: str = "sqlite"
+    sqlite_path: str = ".data/memory.sqlite3"
+    working_max_items: int = 50
+    working_ttl_minutes: int = 60
+    top_k: int = 5
+    user_id: str = "default"
+
+
 class Config(BaseModel):
     """框架总配置，零配置即可实例化运行。"""
 
     llm: LLMConfig = Field(default_factory=LLMConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
     max_history_length: int = 100
     debug: bool = False
 
@@ -47,9 +60,27 @@ class Config(BaseModel):
             max_steps=int(os.getenv("AGENT_MAX_STEPS", "6")),
             max_tool_iterations=int(os.getenv("AGENT_MAX_TOOL_ITERATIONS", "3")),
         )
+        memory = MemoryConfig(
+            enabled=_env_bool("MEMORY_ENABLED", True),
+            store=os.getenv("MEMORY_STORE", "sqlite"),
+            sqlite_path=os.getenv("MEMORY_SQLITE_PATH", ".data/memory.sqlite3"),
+            working_max_items=int(os.getenv("MEMORY_WORKING_MAX_ITEMS", "50")),
+            working_ttl_minutes=int(os.getenv("MEMORY_WORKING_TTL_MINUTES", "60")),
+            top_k=int(os.getenv("MEMORY_TOP_K", "5")),
+            user_id=os.getenv("USER_ID", "default"),
+        )
         return cls(
             llm=llm,
             agent=agent,
+            memory=memory,
             max_history_length=int(os.getenv("MAX_HISTORY_LENGTH", "100")),
             debug=os.getenv("DEBUG", "false").lower() == "true",
         )
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """读取布尔环境变量；未设置时返回默认值。"""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
