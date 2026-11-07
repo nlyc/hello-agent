@@ -16,6 +16,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# 语义向量后端（可选）；默认离线使用 HashingEmbedder，不安装本 extras 也能运行。
+fastembed = ["fastembed>=0.9,<1.0"]
 
 [tool.setuptools.packages.find]
 include = ["agentflow*"]

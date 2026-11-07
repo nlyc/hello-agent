@@ -23,3 +23,23 @@ class AgentError(AgentFlowError):
 
 class WorkflowError(AgentFlowError):
     """工作流（图）执行失败。"""
+
+
+class RAGError(AgentFlowError):
+    """RAG / 检索层通用异常。"""
+
+
+class RetrievalError(RAGError):
+    """检索过程失败（向量维度非法、索引状态异常等）。"""
+
+
+class EmbeddingMismatchError(RAGError):
+    """向量指纹或维度不一致，需要重建索引。"""
+
+
+class DocumentLoadError(RAGError):
+    """文档加载失败（格式不支持、解析为空、来源不安全等）。"""
+
+
+class MemoryError(AgentFlowError):
+    """记忆层读写失败。"""
