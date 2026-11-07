@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from agentflow.core.agent import Agent
+from agentflow.core.agent import Agent, prepend_memory_text
 
 INITIAL_TEMPLATE = """你是一位{role}。请根据以下要求完成任务。
 
@@ -54,8 +54,11 @@ class ReflectionAgent(Agent):
         custom_prompts: Optional[dict] = None,
         memory=None,
         tracer=None,
+        memory_enabled: Optional[bool] = None,
     ):
-        super().__init__(name, llm, system_prompt, config, memory, tracer)
+        super().__init__(
+            name, llm, system_prompt, config, memory, tracer, memory_enabled
+        )
         self.max_iterations = max_iterations
         self.role = role
         self.reviewer_role = reviewer_role
@@ -71,11 +74,13 @@ class ReflectionAgent(Agent):
     def _chat(self, prompt: str, step: int = 0) -> str:
         return self._call_llm([{"role": "user", "content": prompt}], step=step).strip()
 
-    def _execute(self, input_text: str, **kwargs) -> str:
+    def _execute(self, input_text: str, memory_context=None, **kwargs) -> str:
         self._records = []
+        # 记忆文本前置到任务，initial / reflect / refine 三段共享同一份任务
+        task = prepend_memory_text(input_text, memory_context)
         step = 1
         result = self._chat(
-            self._templates["initial"].format(role=self.role, task=input_text), step=step
+            self._templates["initial"].format(role=self.role, task=task), step=step
         )
         self._records.append({"type": "execution", "content": result})
 
@@ -83,7 +88,7 @@ class ReflectionAgent(Agent):
             step += 1
             feedback = self._chat(
                 self._templates["reflect"].format(
-                    reviewer_role=self.reviewer_role, task=input_text, result=result
+                    reviewer_role=self.reviewer_role, task=task, result=result
                 ),
                 step=step,
             )
@@ -93,7 +98,7 @@ class ReflectionAgent(Agent):
             step += 1
             result = self._chat(
                 self._templates["refine"].format(
-                    role=self.role, task=input_text, last_result=result, feedback=feedback
+                    role=self.role, task=task, last_result=result, feedback=feedback
                 ),
                 step=step,
             )
