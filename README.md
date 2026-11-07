@@ -74,4 +74,4 @@ py -3.14 -m pip install -e ".[embed,rag]"
 - [x] M8.3 记忆：工作记忆 / 长期记忆 / MemoryManager / MemoryTool
 - [x] M8.4 三范式自动注入记忆上下文
 - [x] M8.5 记忆 + RAG 演示、上传 PDF/DOCX/URL、召回与回答评估报告
-- [ ] M8.6 回归与交付检查
+- [x] M8.6 回归与交付检查（[`docs/m8-delivery-check.md`](docs/m8-delivery-check.md)）
