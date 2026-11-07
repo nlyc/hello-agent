@@ -244,6 +244,23 @@ class SQLiteVectorStore:
         values = [row["embedding_fingerprint"] for row in rows]
         return values[0] if values else None
 
+    def content_hashes(
+        self, namespace: str | None = None, doc_id: str | None = None
+    ) -> set[str]:
+        """返回已入库的内容哈希集合，用于跨文档/同文档去重。"""
+        clauses = ["content_hash <> ''"]
+        params: list[Any] = []
+        if namespace is not None:
+            clauses.append("namespace = ?")
+            params.append(namespace)
+        if doc_id is not None:
+            clauses.append("doc_id = ?")
+            params.append(doc_id)
+        sql = "SELECT DISTINCT content_hash FROM chunks WHERE " + " AND ".join(clauses)
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return {row["content_hash"] for row in rows}
+
     def close(self) -> None:
         """关闭数据库连接（可重复调用）。"""
         with self._lock:

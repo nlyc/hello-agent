@@ -48,6 +48,20 @@ class BM25Index:
             self._tokens.pop(chunk_id, None)
             return self._chunks.pop(chunk_id, None) is not None
 
+    def remove_doc(self, doc_id: str, namespace: str | None = None) -> int:
+        """删除指定文档（可限定命名空间）的全部 chunk，返回删除条数。"""
+        with self._lock:
+            targets = [
+                chunk_id
+                for chunk_id, chunk in self._chunks.items()
+                if chunk.doc_id == doc_id
+                and (namespace is None or chunk.namespace == namespace)
+            ]
+            for chunk_id in targets:
+                self._chunks.pop(chunk_id, None)
+                self._tokens.pop(chunk_id, None)
+            return len(targets)
+
     def clear(self) -> None:
         """清空索引。"""
         with self._lock:
