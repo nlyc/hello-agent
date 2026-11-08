@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentFlow 控制台</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">AF</div>
+    <div class="brand-text">
+      <h1>AgentFlow 控制台</h1>
+      <p>RAG · 记忆 · 三范式 · 评估 · 测试</p>
+    </div>
+  </div>
+  <div class="top-actions">
+    <span id="health" class="pill pill-wait">连接中…</span>
+    <button id="theme-toggle" class="icon-btn" title="切换明暗主题" aria-label="切换明暗主题">◐</button>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs" aria-label="功能导航">
+  <button class="active" data-tab="overview">概览</button>
+  <button data-tab="knowledge">知识库 / RAG</button>
+  <button data-tab="memory">记忆</button>
+  <button data-tab="paradigms">三范式</button>
+  <button data-tab="demo">完整 Demo</button>
+  <button data-tab="eval">RAG 评估</button>
+  <button data-tab="tests">测试</button>
+</nav>
+
+<main>
+  <!-- 概览 ---------------------------------------------------------------->
+  <section id="tab-overview" class="panel active">
+    <div class="stat-grid">
+      <article class="stat"><span class="stat-label">文档</span><strong id="stat-docs">—</strong><span class="stat-sub">已入库</span></article>
+      <article class="stat"><span class="stat-label">Chunks</span><strong id="stat-chunks">—</strong><span class="stat-sub">向量 + BM25</span></article>
+      <article class="stat"><span class="stat-label">长期记忆</span><strong id="stat-memories">—</strong><span class="stat-sub">SQLite 持久化</span></article>
+      <article class="stat"><span class="stat-label">工作记忆</span><strong id="stat-working">—</strong><span class="stat-sub">进程内</span></article>
+      <article class="stat"><span class="stat-label">向量维度</span><strong id="stat-dim">—</strong><span class="stat-sub">HashingEmbedder</span></article>
+      <article class="stat"><span class="stat-label">BM25 条目</span><strong id="stat-bm25">—</strong><span class="stat-sub">稀疏索引</span></article>
+    </div>
+
+    <div class="grid-2">
+      <article class="card">
+        <header class="card-head"><h2>快速开始</h2><span class="muted">全部操作离线可用</span></header>
+        <div class="quick-actions">
+          <button class="link-btn" data-goto="knowledge" data-preset-query="我想去北京玩一天，有什么景点推荐？">检索北京一日游</button>
+          <button class="link-btn" data-goto="knowledge" data-preset-query="北京下雨天适合去哪？">检索雨天备选</button>
+          <button class="link-btn" data-goto="memory" data-preset-query="北京怎么安排">召回行程记忆</button>
+          <button class="link-btn" data-goto="paradigms">跑三范式对照</button>
+          <button class="link-btn" data-goto="eval">跑 RAG 评估</button>
+          <button class="link-btn" data-goto="tests">跑测试套件</button>
+        </div>
+        <h3 class="sub-title">命令行等价用法</h3>
+        <pre class="code-block">py -3.14 -m examples.web_app --port 8000
+
+py -3.14 -m examples.demo_travel_memory_rag --out-dir demo_output
+py -3.14 scripts/eval_rag.py --out docs/m8-memory-rag-eval.md
+py -3.14 -m pytest -q</pre>
+      </article>
+
+      <article class="card">
+        <header class="card-head"><h2>运行环境</h2><span id="env-pill" class="pill">—</span></header>
+        <dl class="kv">
+          <dt>命名空间</dt><dd id="env-namespace">—</dd>
+          <dt>用户 ID</dt><dd id="env-user">—</dd>
+          <dt>数据目录</dt><dd id="env-datadir" class="mono wrap">—</dd>
+          <dt>Embedding</dt><dd id="env-fingerprint" class="mono wrap">—</dd>
+          <dt>分块参数</dt><dd id="env-chunk">—</dd>
+        </dl>
+        <p class="hint">数据保存在 <span class="mono">.data/webui</span>，重启服务后文档索引、长期记忆与 Demo 产物都会保留。</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- 知识库 / RAG -------------------------------------------------------->
+  <section id="tab-knowledge" class="panel">
+    <div class="grid-2 wide-left">
+      <article class="card">
+        <header class="card-head">
+          <h2>文档入库</h2>
+          <button id="clear-docs" class="ghost-btn danger">清空索引</button>
+        </header>
+        <form id="upload-form" class="form-row">
+          <label class="field grow">
+            <span>上传文件（MD / TXT / PDF / DOCX）</span>
+            <input type="file" id="upload-file" accept=".md,.markdown,.txt,.pdf,.docx" required>
+          </label>
+          <label class="field">
+            <span>标题（可选）</span>
+            <input type="text" id="upload-title" placeholder="默认取文件名">
+          </label>
+          <button class="primary-btn" type="submit">入库</button>
+        </form>
+        <form id="url-form" class="form-row">
+          <label class="field grow">
+            <span>从公网 URL 入库</span>
+            <input type="url" id="url-input" placeholder="https://example.com/article" required>
+          </label>
+          <label class="field">
+            <span>标题（可选）</span>
+            <input type="text" id="url-title" placeholder="默认取网页标题">
+          </label>
+          <button class="primary-btn" type="submit">抓取并入库</button>
+        </form>
+        <p class="hint">出于安全考虑，URL 抓取默认拒绝内网 / 回环地址；抓取结果会落盘到数据目录，重启后无需重新联网。</p>
+
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>标题</th><th>doc_id</th><th>chunks</th><th>来源</th><th>入库时间</th><th></th></tr></thead>
+            <tbody id="doc-rows"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+
+      <div class="stack">
+        <article class="card">
+          <header class="card-head"><h2>检索</h2><span id="search-count" class="muted"></span></header>
+          <form id="search-form" class="form-row">
+            <label class="field grow">
+              <span>问题 / 关键词</span>
+              <input type="text" id="search-query" list="question-presets" placeholder="例如：北京下雨天适合去哪？" required>
+            </label>
+            <label class="field narrow">
+              <span>模式</span>
+              <select id="search-mode">
+                <option value="hybrid">混合（RRF）</option>
+                <option value="bm25">BM25</option>
+                <option value="vector">向量</option>
+              </select>
+            </label>
+            <label class="field narrow">
+              <span>Top K</span>
+              <input type="number" id="search-topk" value="5" min="1" max="20">
+            </label>
+            <button class="primary-btn" type="submit">检索</button>
+          </form>
+          <datalist id="question-presets"></datalist>
+          <div id="search-results" class="results"></div>
+        </article>
+
+        <article class="card">
+          <header class="card-head"><h2>带引用问答</h2><label class="check"><input type="checkbox" id="answer-llm" checked> 使用离线 Demo LLM</label></header>
+          <form id="answer-form" class="form-row">
+            <label class="field grow">
+              <span>问题</span>
+              <input type="text" id="answer-question" placeholder="例如：香山秋天什么时候去最好？" required>
+            </label>
+            <label class="field narrow">
+              <span>Top K</span>
+              <input type="number" id="answer-topk" value="5" min="1" max="20">
+            </label>
+            <button class="primary-btn" type="submit">回答</button>
+          </form>
+          <div id="answer-result" class="results"></div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- 记忆 ---------------------------------------------------------------->
+  <section id="tab-memory" class="panel">
+    <div class="stat-grid compact">
+      <article class="stat"><span class="stat-label">长期记忆</span><strong id="mem-count">—</strong><span class="stat-sub">当前用户</span></article>
+      <article class="stat"><span class="stat-label">工作记忆</span><strong id="mem-working">—</strong><span class="stat-sub">当前会话</span></article>
+      <article class="stat"><span class="stat-label">类型分布</span><strong id="mem-types" class="small-strong">—</strong><span class="stat-sub">semantic / episodic</span></article>
+      <article class="stat"><span class="stat-label">向量维度</span><strong id="mem-dim">—</strong><span class="stat-sub">与索引一致</span></article>
+    </div>
+
+    <div class="grid-2">
+      <article class="card">
+        <header class="card-head"><h2>写入记忆</h2><button id="clear-memory" class="ghost-btn danger">清空记忆</button></header>
+        <form id="memory-add-form" class="form-col">
+          <label class="field">
+            <span>记忆内容</span>
+            <textarea id="memory-content" rows="3" placeholder="例如：用户偏好自然风光，不喜欢爬坡。" required></textarea>
+          </label>
+          <div class="form-row">
+            <label class="field">
+              <span>类型</span>
+              <select id="memory-type">
+                <option value="semantic">semantic（偏好 / 事实）</option>
+                <option value="episodic">episodic（事件 / 对话）</option>
+                <option value="procedural">procedural（流程 / 习惯）</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>重要度 <output id="importance-out">0.5</output></span>
+              <input type="range" id="memory-importance" min="0" max="1" step="0.1" value="0.5">
+            </label>
+            <button class="primary-btn" type="submit">写入</button>
+          </div>
+        </form>
+
+        <h3 class="sub-title">记录一轮对话</h3>
+        <form id="memory-turn-form" class="form-col">
+          <div class="form-row">
+            <label class="field grow"><span>用户输入</span><input type="text" id="turn-question" placeholder="例如：第二天北京下雨了怎么办？" required></label>
+            <label class="field grow"><span>助手回答</span><input type="text" id="turn-answer" placeholder="例如：改去中国国家博物馆。"></label>
+          </div>
+          <button class="secondary-btn" type="submit">写入 episodic 记忆</button>
+        </form>
+      </article>
+
+      <div class="stack">
+        <article class="card">
+          <header class="card-head"><h2>记忆检索</h2></header>
+          <form id="memory-search-form" class="form-row">
+            <label class="field grow"><span>查询</span><input type="text" id="memory-query" list="memory-presets" placeholder="例如：北京怎么安排" required></label>
+            <label class="field narrow"><span>Top K</span><input type="number" id="memory-topk" value="5" min="1" max="50"></label>
+            <button class="primary-btn" type="submit">检索</button>
+          </form>
+          <datalist id="memory-presets"></datalist>
+          <div id="memory-search-results" class="results"></div>
+        </article>
+
+        <article class="card">
+          <header class="card-head"><h2>构建上下文</h2><span class="muted">注入 Agent 的文本</span></header>
+          <form id="memory-context-form" class="form-row">
+            <label class="field grow"><span>查询</span><input type="text" id="context-query" placeholder="例如：第 2 天北京下雨了，帮我调整行程" required></label>
+            <label class="field narrow"><span>Token 预算</span><input type="number" id="context-tokens" value="1500" min="1" max="8000"></label>
+            <button class="primary-btn" type="submit">构建</button>
+          </form>
+          <div id="memory-context-result" class="results"></div>
+        </article>
+      </div>
+    </div>
+
+    <article class="card">
+      <header class="card-head"><h2>长期记忆列表</h2><span class="muted" id="memory-list-count"></span></header>
+      <div id="memory-list" class="memory-list"></div>
+    </article>
+  </section>
+
+  <!-- 三范式 -------------------------------------------------------------->
+  <section id="tab-paradigms" class="panel">
+    <article class="card">
+      <header class="card-head">
+        <h2>ReAct / Reflection / Plan-and-Solve：无记忆 vs 有记忆</h2>
+        <button id="run-paradigms" class="primary-btn">运行对照</button>
+      </header>
+      <p class="hint">每次运行使用独立的临时记忆并写入演示画像，不会污染“记忆”页签中的数据。</p>
+      <div id="paradigm-question" class="callout hidden"></div>
+      <div id="paradigm-results" class="results"></div>
+      <div id="workflow-result" class="results"></div>
+    </article>
+  </section>
+
+  <!-- 完整 Demo ----------------------------------------------------------->
+  <section id="tab-demo" class="panel">
+    <div class="grid-2 wide-left">
+      <article class="card">
+        <header class="card-head"><h2>运行完整 Demo</h2></header>
+        <form id="demo-form" class="form-col">
+          <div class="form-row">
+            <label class="field">
+              <span>向量后端</span>
+              <select id="demo-embed">
+                <option value="hashing">hashing（离线）</option>
+                <option value="fastembed">fastembed（需安装）</option>
+              </select>
+            </label>
+            <label class="field grow">
+              <span>额外入库（可选，本地路径或公网 URL）</span>
+              <input type="text" id="demo-ingest" placeholder="docs/m8-memory-rag-eval.md">
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field grow">
+              <span>额外提问（可选）</span>
+              <input type="text" id="demo-query" placeholder="北京下雨天适合去哪？">
+            </label>
+            <button class="primary-btn" type="submit">运行 Demo</button>
+          </div>
+        </form>
+        <p class="hint">输出写入 <span class="mono">.data/webui/runs/&lt;run-id&gt;/</span>，包含 rag_eval.md、memory.json、trace.jsonl。</p>
+        <div id="demo-artifacts" class="results"></div>
+      </article>
+
+      <article class="card">
+        <header class="card-head"><h2>历史运行</h2><button id="refresh-runs" class="ghost-btn">刷新</button></header>
+        <div id="demo-runs" class="run-list"><p class="empty">加载中…</p></div>
+      </article>
+    </div>
+
+    <article class="card">
+      <header class="card-head"><h2>报告预览</h2><span id="demo-run-label" class="muted"></span></header>
+      <div id="demo-report" class="markdown"><p class="empty">运行一次 Demo 后在此查看完整报告。</p></div>
+    </article>
+  </section>
+
+  <!-- RAG 评估 ------------------------------------------------------------>
+  <section id="tab-eval" class="panel">
+    <article class="card">
+      <header class="card-head">
+        <h2>召回与回答评估</h2>
+        <button id="run-eval" class="primary-btn">运行评估</button>
+      </header>
+      <form class="form-row" id="eval-form">
+        <label class="field">
+          <span>后端</span>
+          <select id="eval-backend">
+            <option value="all">all（BM25 + Hashing）</option>
+            <option value="bm25">BM25</option>
+            <option value="hashing">Hashing</option>
+            <option value="fastembed">fastembed（需安装）</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="eval-online"> 允许联网加载 FastEmbed（首次会下载模型）</label>
+      </form>
+      <div id="eval-metrics" class="results"></div>
+      <div id="eval-report" class="markdown"></div>
+    </article>
+
+    <article class="card">
+      <header class="card-head"><h2>评估集</h2><span id="eval-case-count" class="muted"></span></header>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>ID</th><th>问题</th><th>Gold 答案</th><th>Gold chunk</th></tr></thead>
+          <tbody id="eval-case-rows"><tr><td colspan="4" class="empty">加载中…</td></tr></tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+
+  <!-- 测试 ---------------------------------------------------------------->
+  <section id="tab-tests" class="panel">
+    <article class="card">
+      <header class="card-head">
+        <h2>Pytest 测试套件</h2>
+        <button id="run-all-tests" class="primary-btn">运行全部测试</button>
+      </header>
+      <p class="hint">测试在独立子进程中运行（15 分钟超时），只允许执行 <span class="mono">tests/test_*.py</span> 白名单文件。</p>
+      <div id="test-list" class="test-list"><p class="empty">加载中…</p></div>
+    </article>
+
+    <article class="card">
+      <header class="card-head"><h2>运行输出</h2><span id="test-summary" class="muted"></span></header>
+      <pre id="test-output" class="terminal">尚未运行测试。</pre>
+    </article>
+  </section>
+</main>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script src="/app.js"></script>
+</body>
+</html>

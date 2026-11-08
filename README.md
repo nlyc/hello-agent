@@ -34,6 +34,10 @@ py -3.14 -m examples.demo_travel_memory_rag --out-dir demo_output
 # M8 评估：召回命中率 + 回答层指标，生成 docs/m8-memory-rag-eval.md
 py -3.14 scripts/eval_rag.py --out docs/m8-memory-rag-eval.md
 
+# Web 控制台：浏览器里操作全部能力（文档入库 / 检索 / 记忆 / 三范式 / Demo / 评估 / 测试）
+py -3.14 -m examples.web_app            # 默认 http://127.0.0.1:8000
+py -3.14 -m examples.web_app --port 8080 --no-browser
+
 # 三范式轨迹对比（生成 JSONL + 对比表，驱动 D6 报告）
 py -3.14 scripts/gen_trajectory_report.py
 
@@ -46,13 +50,31 @@ py -3.14 -m pip install -e .
 py -3.14 -m pip install -e ".[embed,rag]"
 ```
 
+## Web 控制台
+
+`examples/web_app.py` 用标准库 `ThreadingHTTPServer` 提供零依赖的本地控制台（仅监听 `127.0.0.1`），
+所有数据和产物保存在 `.data/webui/`，重启后文档索引、长期记忆与历史 Demo 运行都会保留。
+
+| 页签 | 能做什么 |
+|---|---|
+| 概览 | 索引 / 记忆统计、运行环境、快捷入口 |
+| 知识库 / RAG | 上传 MD/TXT/PDF/DOCX、公网 URL 入库、删除文档、混合 / BM25 / 向量检索、带引用问答 |
+| 记忆 | 写入 semantic/episodic/procedural 记忆、记录对话轮次、检索、构建注入上下文、清空 |
+| 三范式 | ReAct / Reflection / Plan-and-Solve 无记忆 vs 有记忆对照（使用隔离的临时记忆） |
+| 完整 Demo | 调用 `demo_travel_memory_rag`，查看报告与产物下载 |
+| RAG 评估 | 运行 `scripts/eval_rag.py` 的后端评估，展示 recall@k / MRR / 事实命中 / 引用覆盖 |
+| 测试 | 列出并运行 `tests/test_*.py`（子进程 + 白名单校验） |
+
+接口为同源 JSON API（`/api/status`、`/api/ingest`、`/api/search`、`/api/memory/*`、`/api/paradigms/run`、
+`/api/demo/run`、`/api/eval/run`、`/api/tests/run` 等），也可直接用 `curl` 调用。
+
 ## 交付物清单
 
 | # | 交付物 | 位置 |
 |---|---|---|
 | D1 | 代码仓库（零外部框架依赖） | 本仓库 |
 | D2 | 架构图（Mermaid + PNG） | [`docs/architecture.md`](docs/architecture.md) + [`docs/architecture.png`](docs/architecture.png) |
-| D3 | 单元测试（228 个通过 / 2 跳过，全绿） | [`tests/`](tests/) |
+| D3 | 单元测试（248 个通过 / 2 跳过，全绿） | [`tests/`](tests/) |
 | D4 | 端到端演示 | [`examples/demo_e2e.py`](examples/demo_e2e.py) |
 | D5 | API 设计文档 | [`docs/api-design.md`](docs/api-design.md) |
 | D6 | 三范式轨迹对比报告 | [`docs/trajectory-comparison.md`](docs/trajectory-comparison.md) |

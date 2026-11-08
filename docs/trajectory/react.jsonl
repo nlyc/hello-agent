@@ -12,3 +12,10 @@
 {"type": "tool", "agent_name": "react", "step": 2, "data": {"tool": "get_attraction", "params": {"city": "北京", "weather": "晴"}, "output": "北京天气晴，推荐：故宫、颐和园、长城"}, "timestamp": "2026-10-30T17:10:40.271", "trace_id": "react"}
 {"type": "llm", "agent_name": "react", "step": 3, "data": {"output": "Thought: 信息齐了\nAction: Finish[北京今天晴，推荐故宫、颐和园、长城，适合户外游玩。]"}, "timestamp": "2026-10-30T17:10:40.271", "trace_id": "react"}
 {"type": "end", "agent_name": "react", "step": 0, "data": {"result": "北京今天晴，推荐故宫、颐和园、长城，适合户外游玩。"}, "timestamp": "2026-10-30T17:10:40.271", "trace_id": "react"}
+{"type": "start", "agent_name": "react", "step": 0, "data": {"input": "我想去北京玩一天，天气怎么样？有什么景点推荐？"}, "timestamp": "2026-10-30T17:25:12.484", "trace_id": "react"}
+{"type": "llm", "agent_name": "react", "step": 1, "data": {"output": "Thought: 先查北京今天天气\nAction: get_weather(city=\"北京\")"}, "timestamp": "2026-10-30T17:25:12.484", "trace_id": "react"}
+{"type": "tool", "agent_name": "react", "step": 1, "data": {"tool": "get_weather", "params": {"city": "北京"}, "output": "北京今天晴，20~25℃，适合户外"}, "timestamp": "2026-10-30T17:25:12.485", "trace_id": "react"}
+{"type": "llm", "agent_name": "react", "step": 2, "data": {"output": "Thought: 天气不错，查适合的景点\nAction: get_attraction(city=\"北京\", weather=\"晴\")"}, "timestamp": "2026-10-30T17:25:12.485", "trace_id": "react"}
+{"type": "tool", "agent_name": "react", "step": 2, "data": {"tool": "get_attraction", "params": {"city": "北京", "weather": "晴"}, "output": "北京天气晴，推荐：故宫、颐和园、长城"}, "timestamp": "2026-10-30T17:25:12.485", "trace_id": "react"}
+{"type": "llm", "agent_name": "react", "step": 3, "data": {"output": "Thought: 信息齐了\nAction: Finish[北京今天晴，推荐故宫、颐和园、长城，适合户外游玩。]"}, "timestamp": "2026-10-30T17:25:12.485", "trace_id": "react"}
+{"type": "end", "agent_name": "react", "step": 0, "data": {"result": "北京今天晴，推荐故宫、颐和园、长城，适合户外游玩。"}, "timestamp": "2026-10-30T17:25:12.485", "trace_id": "react"}

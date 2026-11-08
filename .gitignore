@@ -9,3 +9,4 @@ build/
 .venv/
 venv/
 demo_output/
+.data/

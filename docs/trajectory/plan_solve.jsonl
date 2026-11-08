@@ -8,3 +8,8 @@
 {"type": "llm", "agent_name": "plan_solve", "step": 2, "data": {"output": "北京今天天气晴朗。"}, "timestamp": "2026-10-30T17:10:40.273", "trace_id": "plan_solve"}
 {"type": "llm", "agent_name": "plan_solve", "step": 3, "data": {"output": "晴天推荐故宫、颐和园、长城，适合散步拍照。"}, "timestamp": "2026-10-30T17:10:40.273", "trace_id": "plan_solve"}
 {"type": "end", "agent_name": "plan_solve", "step": 0, "data": {"result": "晴天推荐故宫、颐和园、长城，适合散步拍照。"}, "timestamp": "2026-10-30T17:10:40.273", "trace_id": "plan_solve"}
+{"type": "start", "agent_name": "plan_solve", "step": 0, "data": {"input": "我想去北京玩一天，天气怎么样？有什么景点推荐？"}, "timestamp": "2026-10-30T17:25:12.487", "trace_id": "plan_solve"}
+{"type": "llm", "agent_name": "plan_solve", "step": 1, "data": {"output": "```python\n[\"查询北京天气\", \"根据天气推荐适合的景点\"]\n```"}, "timestamp": "2026-10-30T17:25:12.487", "trace_id": "plan_solve"}
+{"type": "llm", "agent_name": "plan_solve", "step": 2, "data": {"output": "北京今天天气晴朗。"}, "timestamp": "2026-10-30T17:25:12.487", "trace_id": "plan_solve"}
+{"type": "llm", "agent_name": "plan_solve", "step": 3, "data": {"output": "晴天推荐故宫、颐和园、长城，适合散步拍照。"}, "timestamp": "2026-10-30T17:25:12.487", "trace_id": "plan_solve"}
+{"type": "end", "agent_name": "plan_solve", "step": 0, "data": {"result": "晴天推荐故宫、颐和园、长城，适合散步拍照。"}, "timestamp": "2026-10-30T17:25:12.487", "trace_id": "plan_solve"}

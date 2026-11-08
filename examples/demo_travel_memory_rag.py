@@ -21,6 +21,9 @@
     memory.json  —— 长期记忆状态与各阶段召回上下文
     rag_eval.md  —— 带 / 不带 RAG 的回答对照表
 
+终端会打印 ``rag_eval.md`` 的完整内容（三范式对照、上传文档问答、带 / 不带
+RAG 对照、多轮改行程与跨会话召回），便于直接查看结果。
+
 说明：示例 PDF 用 ASCII 英文正文（避免在仓库中引入中文字体文件）；真实中文
 PDF 只要内嵌字体、编码正常即可被 ``pypdf`` 解析，不需要额外处理。
 """
@@ -826,7 +829,8 @@ def run_demo(
                     "",
                 ]
             )
-        (output / "rag_eval.md").write_text("\n".join(report_lines), encoding="utf-8")
+        report_text = "\n".join(report_lines)
+        (output / "rag_eval.md").write_text(report_text, encoding="utf-8")
 
         return {
             "out_dir": str(output),
@@ -839,6 +843,7 @@ def run_demo(
             "itinerary": itinerary,
             "cross_session": cross_session,
             "workflow_answer": workflow_answer,
+            "report": report_text,
         }
     finally:
         tracer.unsubscribe(handle)
@@ -906,10 +911,11 @@ def main(argv: list[str] | None = None) -> int:
         query=args.query,
     )
     print(f"Demo 完成：{result['out_dir']}")
-    print(f"索引统计：{json.dumps(result['stats'], ensure_ascii=False)}")
-    print(f"三范式对照：{len(result['paradigms'])} 组")
-    print(f"上传文档问答：{len(result['uploads'])} 组")
-    print(f"RAG 对照：{len(result['rag_compare'])} 组")
+    print("产物：")
+    for name in ("rag_eval.md", "memory.json", "trace.jsonl"):
+        print(f"  - {Path(result['out_dir']) / name}")
+    print()
+    print(result["report"])
     return 0
 
 

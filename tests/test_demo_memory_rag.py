@@ -9,6 +9,7 @@ from examples.demo_travel_memory_rag import (
     DEMO_USER_ID,
     KNOWLEDGE_DOCS,
     knowledge_documents,
+    main,
     run_demo,
 )
 
@@ -98,6 +99,18 @@ def test_demo_cli_accepts_query_and_ingest(tmp_path):
     assert result["stats"]["chunks"] >= len(KNOWLEDGE_DOCS) + 1
     assert "## 自定义问题" in report
     assert "景山公园早上六点开门" in report
+
+
+def test_demo_cli_prints_report(tmp_path, capsys):
+    """命令行应直接打印报告内容，而不只是计数。"""
+    code = main(["--out-dir", str(tmp_path / "cli")])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "## 三范式：无记忆 vs 有记忆" in out
+    assert "## 带 / 不带 RAG 的回答对照" in out
+    assert "## 跨会话召回" in out
+    assert "rag_eval.md" in out and "memory.json" in out
 
 
 def test_knowledge_documents_have_explicit_ids():
