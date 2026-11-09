@@ -279,7 +279,14 @@ class WebState:
             raise ApiError("embed_backend 必须是 hashing 或 fastembed")
         store = self._build_store(embedder, vector_store_kind)
         bm25 = BM25Index()
-        pipeline = RAGPipeline(embedder, store, bm25, namespace=self.namespace)
+        pipeline = RAGPipeline(
+            embedder,
+            store,
+            bm25,
+            namespace=self.namespace,
+            min_score=self.config.retrieval.min_score,
+            place_guard=self.config.retrieval.place_guard,
+        )
         long_term = LongTermMemory(
             embedder, path=self._memory_path(), user_id=self.user_id
         )
@@ -507,7 +514,12 @@ class WebState:
             self.rag_store = store
             self.bm25 = bm25
             self.pipeline = RAGPipeline(
-                self.embedder, store, bm25, namespace=self.namespace
+                self.embedder,
+                store,
+                bm25,
+                namespace=self.namespace,
+                min_score=self.config.retrieval.min_score,
+                place_guard=self.config.retrieval.place_guard,
             )
             self.vector_store_kind = kind
             self.store_error = None

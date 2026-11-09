@@ -49,6 +49,7 @@ class QdrantVectorStore:
         self._client: Any | None = None
         self._lock = threading.RLock()
         self._collection_ready = False
+        self._payload_indexes_ready = False
 
     # ------------------------------------------------------------------ 基础
     def _ensure_client(self) -> Any:
@@ -97,7 +98,30 @@ class QdrantVectorStore:
                 ),
             )
             self.dimension = vector_size
+        # Qdrant 对过滤字段要求建索引（Cloud 上尤其严格）；namespace/doc_id
+        # 是所有检索与删除操作都会用到的关键字字段。
+        self._ensure_payload_indexes(client)
         self._collection_ready = True
+
+    def _ensure_payload_indexes(self, client: Any) -> None:
+        """为过滤字段创建关键字索引（幂等，每个实例只尝试一次）。"""
+        if self._payload_indexes_ready:
+            return
+        from qdrant_client.models import PayloadSchemaType
+
+        for field in ("namespace", "doc_id"):
+            try:
+                client.create_payload_index(
+                    collection_name=self.collection,
+                    field_name=field,
+                    field_schema=PayloadSchemaType.KEYWORD,
+                    wait=True,
+                )
+            except Exception as exc:
+                raise RAGError(
+                    f"Qdrant 集合 '{self.collection}' 无法创建 '{field}' 索引：{exc}"
+                ) from exc
+        self._payload_indexes_ready = True
 
     def _collection_vector_size(self, client: Any) -> int | None:
         """读取已有集合的向量维度。"""
@@ -195,6 +219,7 @@ class QdrantVectorStore:
         if not self._collection_ready:
             if not client.collection_exists(self.collection):
                 return []
+            self._ensure_payload_indexes(client)
             actual = self._collection_vector_size(client)
             if actual is not None and actual != len(query):
                 raise EmbeddingMismatchError(
@@ -232,6 +257,7 @@ class QdrantVectorStore:
         client = self._ensure_client()
         if not client.collection_exists(self.collection):
             return []
+        self._ensure_payload_indexes(client)
         filters = {"namespace": namespace} if namespace else {}
         query_filter = _build_filter(filters)
         chunks: list[Chunk] = []
@@ -257,6 +283,7 @@ class QdrantVectorStore:
         client = self._ensure_client()
         if not client.collection_exists(self.collection):
             return set()
+        self._ensure_payload_indexes(client)
         filters: dict[str, Any] = {}
         if namespace is not None:
             filters["namespace"] = namespace
@@ -287,6 +314,7 @@ class QdrantVectorStore:
         client = self._ensure_client()
         if not client.collection_exists(self.collection):
             return None
+        self._ensure_payload_indexes(client)
         filters = {"namespace": namespace} if namespace else {}
         records, _ = client.scroll(
             collection_name=self.collection,
@@ -306,6 +334,7 @@ class QdrantVectorStore:
         client = self._ensure_client()
         if not client.collection_exists(self.collection):
             return 0
+        self._ensure_payload_indexes(client)
         if doc_id is None and namespace is None:
             total = self.count()
             client.delete_collection(self.collection)
@@ -347,6 +376,7 @@ class QdrantVectorStore:
         client = self._ensure_client()
         if not client.collection_exists(self.collection):
             return 0
+        self._ensure_payload_indexes(client)
         if namespace is None:
             query_filter = None
         else:

@@ -48,6 +48,10 @@ class RetrievalConfig(BaseModel):
     hf_endpoint: str = "https://hf-mirror.com"
     vector_store: str = "sqlite"  # sqlite | qdrant
     sqlite_path: str = ".data/rag.sqlite3"
+    # 向量召回余弦相似度下限（0=关闭）；不同 Embedder 分数量纲不同。
+    min_score: float = 0.0
+    # 问题点名城市但资料未覆盖时，直接回答“未收录”，不用其它城市凑答案。
+    place_guard: bool = True
 
 
 class QdrantConfig(BaseModel):
@@ -114,6 +118,8 @@ class Config(BaseModel):
             hf_endpoint=get_env("HF_ENDPOINT", "https://hf-mirror.com"),
             vector_store=get_env("VECTOR_STORE", "sqlite"),
             sqlite_path=get_env("RAG_SQLITE_PATH", ".data/rag.sqlite3"),
+            min_score=env_float("RAG_MIN_SCORE", 0.0),
+            place_guard=env_bool("RAG_PLACE_GUARD", True),
         )
         qdrant = QdrantConfig(
             url=get_env("QDRANT_URL"),

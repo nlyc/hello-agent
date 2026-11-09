@@ -17,6 +17,7 @@ from agentflow.retrieval import (
 
 GUIDE = "# 北京旅游\n故宫每天八点三十分开放。\n## 美食\n北京烤鸭推荐全聚德。\n"
 UPDATED = "# 北京旅游\n上海外滩夜景很美。\n## 美食\n小笼包推荐南翔。\n"
+NANCHANG = "# 南昌旅行\n## 滕王阁\n滕王阁大部分展馆在室内，雨天可以正常参观。\n"
 
 
 def _write(path: Path, content: str) -> Path:
@@ -133,6 +134,43 @@ def test_answer_without_hits(pipeline: RAGPipeline):
     assert answer.hits == []
 
 
+def test_answer_refuses_uncovered_city(tmp_path: Path, pipeline: RAGPipeline):
+    """问题点名南昌，但知识库只有北京：不能拿北京资料凑答案。"""
+    pipeline.ingest(_write(tmp_path / "guide.md", GUIDE))
+
+    answer = pipeline.answer("南昌故宫几点开放？")
+    assert answer.has_answer is False
+    assert "未收录" in answer.answer
+    assert "南昌" in answer.answer
+    assert answer.hits == []
+    assert answer.citations == []
+
+
+def test_answer_keeps_only_covered_city(tmp_path: Path, pipeline: RAGPipeline):
+    pipeline.ingest(_write(tmp_path / "guide.md", GUIDE))
+    pipeline.ingest(_write(tmp_path / "nanchang.md", NANCHANG))
+
+    answer = pipeline.answer("南昌滕王阁雨天能去吗？")
+    assert answer.has_answer is True
+    assert answer.hits
+    assert all(
+        "南昌" in (hit.text + hit.citation) for hit in answer.hits
+    ), [hit.citation for hit in answer.hits]
+
+
+def test_place_guard_can_be_disabled(tmp_path: Path):
+    store = SQLiteVectorStore(":memory:")
+    try:
+        pipeline = RAGPipeline(
+            HashingEmbedder(), store, BM25Index(), place_guard=False
+        )
+        pipeline.ingest(_write(tmp_path / "guide.md", GUIDE))
+        answer = pipeline.answer("南昌故宫几点开放？")
+        assert answer.has_answer is True
+    finally:
+        store.close()
+
+
 class _FakeLLM:
     """记录提示词的假 LLM。"""
 
@@ -166,5 +204,17 @@ def test_fingerprint_mismatch_is_rejected(tmp_path: Path):
         )
         with pytest.raises(EmbeddingMismatchError):
             other.ingest(_write(tmp_path / "other.md", "# 其它\n上海外滩夜景很美。"))
+    finally:
+        store.close()
+
+
+def test_min_score_and_place_guard_read_from_env(monkeypatch):
+    monkeypatch.setenv("RAG_MIN_SCORE", "0.42")
+    monkeypatch.setenv("RAG_PLACE_GUARD", "false")
+    store = SQLiteVectorStore(":memory:")
+    try:
+        pipeline = RAGPipeline(HashingEmbedder(), store, BM25Index())
+        assert pipeline.retriever.min_score == pytest.approx(0.42)
+        assert pipeline.place_guard is False
     finally:
         store.close()

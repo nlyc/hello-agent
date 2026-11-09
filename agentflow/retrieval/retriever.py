@@ -16,6 +16,10 @@ class HybridRetriever:
     候选池大小为 ``top_k * candidate_multiplier``；两路结果按
     ``score = Σ 1 / (rrf_k + rank)`` 融合，rank 从 1 开始。融合后按
     ``content_hash``（缺失时退回 ``chunk_id``）去重，并保留 top_k。
+
+    ``min_score`` 作用于向量召回的**余弦相似度**（RRF 融合前）：低于该值
+    的稠密命中会被丢弃，避免完全不相关的文档仅凭排名进入上下文。默认 0
+    表示不启用；不同 Embedder 的分数量纲不同，建议按后端分别配置。
     """
 
     def __init__(
@@ -26,16 +30,21 @@ class HybridRetriever:
         *,
         rrf_k: int = 60,
         candidate_multiplier: int = 4,
+        min_score: float = 0.0,
     ) -> None:
         if rrf_k <= 0:
             raise RetrievalError("RRF 的 rrf_k 必须大于 0")
         if candidate_multiplier < 1:
             raise RetrievalError("candidate_multiplier 必须大于等于 1")
+        if min_score < 0:
+            raise RetrievalError("min_score 不能为负数")
         self.embedder = embedder
         self.vector_store = vector_store
         self.bm25 = bm25
         self.rrf_k = int(rrf_k)
         self.candidate_multiplier = int(candidate_multiplier)
+        # 向量召回的余弦相似度下限；0 表示关闭（保留所有正分命中）。
+        self.min_score = float(min_score)
 
     def search(
         self,
@@ -54,8 +63,11 @@ class HybridRetriever:
         )
         sparse_hits = self.bm25.search(query, top_k=pool_size, filters=filters)
 
-        # 稠密检索在全零查询下会返回相似度 0 的记录，这类结果不参与融合。
-        dense_hits = [hit for hit in dense_hits if hit.score > 0]
+        # 稠密检索在全零查询下会返回相似度 0 的记录，这类结果不参与融合；
+        # min_score 再过滤掉相似度不足的弱相关命中。
+        dense_hits = [
+            hit for hit in dense_hits if hit.score > 0 and hit.score >= self.min_score
+        ]
         return self._fuse([("dense", dense_hits), ("bm25", sparse_hits)], top_k)
 
     def _fuse(

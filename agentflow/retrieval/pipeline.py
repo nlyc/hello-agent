@@ -9,11 +9,13 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Sequence
 
+from agentflow.core.env import env_bool, env_float
 from agentflow.core.exceptions import EmbeddingMismatchError, RAGError
 from agentflow.memory.message_history import estimate_tokens
 from agentflow.retrieval.bm25 import BM25Index
 from agentflow.retrieval.chunker import Chunker
 from agentflow.retrieval.embedder import Embedder
+from agentflow.retrieval.entities import detect_places
 from agentflow.retrieval.loaders import load_document
 from agentflow.retrieval.retriever import HybridRetriever
 from agentflow.retrieval.types import (
@@ -29,8 +31,12 @@ from agentflow.retrieval.types import (
 RAG_SYSTEM_PROMPT = (
     "你是「智游·山水行」旅行知识问答助手。只能依据给定的【知识库资料】回答，"
     "资料不足时明确说明“知识库中未找到相关内容”，不得编造。"
+    "如果资料没有覆盖用户询问的城市或对象，请直接说明知识库未收录，"
+    "不要用其它城市或其它对象的资料替代作答。"
     "回答末尾用“依据：”列出使用到的资料编号。"
 )
+
+NOT_FOUND_ANSWER = "知识库中未找到相关内容。"
 
 
 class RAGPipeline:
@@ -56,13 +62,30 @@ class RAGPipeline:
         *,
         namespace: str = "travel",
         max_chunks: int = 5000,
+        min_score: float | None = None,
+        place_guard: bool | None = None,
     ) -> None:
         if not namespace:
             raise RAGError("RAGPipeline 的 namespace 不能为空")
         self.embedder = embedder
         self.vector_store = vector_store
         self.bm25 = bm25
-        self.retriever = retriever or HybridRetriever(embedder, vector_store, bm25)
+        if retriever is None:
+            resolved_min_score = (
+                env_float("RAG_MIN_SCORE", 0.0) if min_score is None else min_score
+            )
+            self.retriever = HybridRetriever(
+                embedder, vector_store, bm25, min_score=resolved_min_score
+            )
+        else:
+            self.retriever = retriever
+            if min_score is not None:
+                retriever.min_score = float(min_score)
+        # 地名覆盖校验：问题点名了某个城市，但检索结果都不包含该城市时，
+        # 直接回答“未收录”，避免用其它城市的资料凑答案。
+        self.place_guard = (
+            env_bool("RAG_PLACE_GUARD", True) if place_guard is None else bool(place_guard)
+        )
         self.chunker = chunker or Chunker(max_chunks=max_chunks)
         self.namespace = namespace
         self.max_chunks = int(max_chunks)
@@ -225,11 +248,30 @@ class RAGPipeline:
         if not hits:
             return RAGAnswer(
                 question=question,
-                answer="知识库中未找到相关内容。",
+                answer=NOT_FOUND_ANSWER,
                 citations=[],
                 hits=[],
                 has_answer=False,
             )
+        if self.place_guard:
+            places = detect_places(question)
+            if places:
+                covered = [
+                    hit
+                    for hit in hits
+                    if any(place in _hit_text(hit) for place in places)
+                ]
+                if not covered:
+                    missing = "、".join(places)
+                    return RAGAnswer(
+                        question=question,
+                        answer=f"知识库暂未收录「{missing}」的相关资料。",
+                        citations=[],
+                        hits=[],
+                        has_answer=False,
+                    )
+                # 只保留提到目标城市的资料，避免混合其它城市的推荐。
+                hits = covered
         citations = _unique_citations(hits)
         if llm is None:
             return RAGAnswer(
@@ -268,6 +310,8 @@ class RAGPipeline:
             "chunk_tokens": self.chunker.chunk_tokens,
             "chunk_overlap": self.chunker.overlap,
             "embedding_fingerprint": self.embedder.fingerprint,
+            "min_score": getattr(self.retriever, "min_score", 0.0),
+            "place_guard": self.place_guard,
         }
 
     def _assert_fingerprint(self, namespace: str) -> None:
@@ -290,6 +334,13 @@ class RAGPipeline:
         if not callable(getter):
             return set()
         return set(getter(namespace=namespace, doc_id=doc_id))
+
+
+def _hit_text(hit: RetrievalHit) -> str:
+    """拼接命中里可用于地名判定的文本（正文、标题路径、引用与元数据）。"""
+    parts = [hit.text, hit.citation, hit.source, hit.heading_path]
+    parts.extend(str(value) for value in (hit.metadata or {}).values())
+    return " ".join(part for part in parts if part)
 
 
 def _unique_citations(hits: Sequence[RetrievalHit]) -> list[str]:

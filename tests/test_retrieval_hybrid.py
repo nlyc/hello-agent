@@ -111,3 +111,30 @@ def test_hybrid_empty_query_and_zero_top_k():
         assert retriever.search("故宫", top_k=0) == []
     finally:
         store.close()
+
+
+def test_min_score_filters_weak_dense_hits():
+    embedder = HashingEmbedder()
+    store = SQLiteVectorStore(":memory:")
+    store.upsert([make_chunk("c1", "故宫开放时间是每天八点三十分到十七点。")])
+    try:
+        # BM25 为空，只剩稠密召回；阈值高于实际余弦分（约 0.17）。
+        retriever = HybridRetriever(embedder, store, BM25Index(), min_score=0.99)
+        assert retriever.search("故宫开放时间", top_k=5) == []
+    finally:
+        store.close()
+
+
+def test_min_score_does_not_drop_bm25_hits():
+    embedder = HashingEmbedder()
+    store = SQLiteVectorStore(":memory:")
+    chunks = [make_chunk("c1", "故宫开放时间")]
+    store.upsert(chunks)
+    bm25 = BM25Index()
+    bm25.add(chunks)
+    try:
+        retriever = HybridRetriever(embedder, store, bm25, min_score=0.99)
+        hits = retriever.search("故宫开放时间", top_k=5)
+        assert [hit.chunk_id for hit in hits] == ["c1"]
+    finally:
+        store.close()

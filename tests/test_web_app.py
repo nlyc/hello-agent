@@ -304,6 +304,25 @@ def test_select_llm_uses_online_when_key_configured(console, monkeypatch):
     assert llm is None
 
 
+def test_answer_refuses_uncovered_city(console):
+    base, _ = console
+    payload = _json(
+        base,
+        "/api/answer",
+        method="POST",
+        payload={
+            "question": "南昌下雨天适合去哪？",
+            "top_k": 5,
+            "llm_mode": "none",
+        },
+    )
+
+    assert payload["has_answer"] is False
+    assert "南昌" in payload["answer"]
+    assert payload["hits"] == []
+    assert payload["citations"] == []
+
+
 # --------------------------------------------------------------------- 上传与删除
 
 

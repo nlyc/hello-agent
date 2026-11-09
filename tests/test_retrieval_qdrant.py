@@ -78,9 +78,13 @@ class _FakeClient:
     def __init__(self, points: list[_FakePoint]) -> None:
         self.points = points
         self.scroll_calls: list[dict] = []
+        self.index_calls: list[str] = []
 
     def collection_exists(self, collection: str) -> bool:
         return True
+
+    def create_payload_index(self, *, collection_name, field_name, field_schema, wait):
+        self.index_calls.append(field_name)
 
     def scroll(self, *, collection_name, scroll_filter, limit, offset, **kwargs):
         self.scroll_calls.append(
@@ -119,9 +123,12 @@ def test_list_chunks_scrolls_all_pages():
     assert client.scroll_calls[0]["offset"] is None
     assert client.scroll_calls[1]["offset"] == 256
     assert client.scroll_calls[0]["filter"] is not None
+    # 过滤字段必须有索引，否则 Qdrant Cloud 会返回 400。
+    assert client.index_calls == ["namespace", "doc_id"]
 
 
 def test_list_chunks_without_namespace_has_no_filter():
+    pytest.importorskip("qdrant_client")
     store = QdrantVectorStore("http://127.0.0.1:6333", collection="travel")
     client = _FakeClient([_FakePoint("id-1", {"text": "文本", "namespace": "travel"})])
     store._client = client

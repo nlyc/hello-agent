@@ -3,6 +3,7 @@
 from agentflow.retrieval.bm25 import BM25Index
 from agentflow.retrieval.chunker import Chunker
 from agentflow.retrieval.embedder import Embedder, FastEmbedEmbedder, HashingEmbedder, tokenize
+from agentflow.retrieval.entities import PLACE_NAMES, detect_places
 from agentflow.retrieval.loaders import load_document
 from agentflow.retrieval.pipeline import RAGPipeline
 from agentflow.retrieval.retriever import HybridRetriever
@@ -29,6 +30,7 @@ __all__ = [
     "HashingEmbedder",
     "HybridRetriever",
     "IngestResult",
+    "PLACE_NAMES",
     "QdrantVectorStore",
     "RAGAnswer",
     "RAGPipeline",
@@ -36,6 +38,7 @@ __all__ = [
     "SQLiteVectorStore",
     "VectorStore",
     "citation_for_chunk",
+    "detect_places",
     "load_document",
     "matches_filters",
     "pack_vector",

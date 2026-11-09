@@ -45,6 +45,15 @@ def test_from_env_defaults_when_unset(monkeypatch):
     assert c.agent.max_steps == 6
 
 
+def test_from_env_reads_retrieval_guard_settings(monkeypatch):
+    monkeypatch.setenv("RAG_MIN_SCORE", "0.3")
+    monkeypatch.setenv("RAG_PLACE_GUARD", "false")
+    monkeypatch.setenv("RAG_EXTRA_PLACES", "景德镇,婺源")
+    c = Config.from_env()
+    assert c.retrieval.min_score == 0.3
+    assert c.retrieval.place_guard is False
+
+
 def test_env_snapshot_only_exposes_whitelist_and_masks_secrets(monkeypatch):
     monkeypatch.setenv("LLM_MODEL", "glm-4-plus")
     monkeypatch.setenv("LLM_API_KEY", "sk-secret-value")
