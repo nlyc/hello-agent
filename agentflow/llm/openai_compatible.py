@@ -1,10 +1,10 @@
 """公司中转站实现：统一 OpenAI 兼容接口，换 model 即切换。"""
 
-import os
 from typing import Any, Optional, Sequence
 
 from openai import OpenAI
 
+from agentflow.core.env import get_env
 from agentflow.core.exceptions import LLMError
 from agentflow.core.message import Message
 from agentflow.llm.base import BaseLLM
@@ -22,8 +22,9 @@ def _to_openai_message(item) -> dict[str, Any]:
 class OpenAICompatibleLLM(BaseLLM):
     """基于 OpenAI 兼容网关（公司中转站）的模型客户端。
 
-    base_url / api_key / model 优先取构造参数，其次环境变量 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL，
-    模型默认 deepseek-chat；三家云端（DeepSeek / GLM / OpenAI）只是不同的 model 名。
+    base_url / api_key / model 优先取构造参数，其次 .env / 环境变量
+    LLM_BASE_URL / LLM_API_KEY / LLM_MODEL，模型默认 deepseek-chat；
+    三家云端（DeepSeek / GLM / OpenAI）只是不同的 model 名。
     """
 
     def __init__(
@@ -36,9 +37,9 @@ class OpenAICompatibleLLM(BaseLLM):
         registry: Optional[ModelRegistry] = None,
         client: Optional[Any] = None,
     ):
-        self.base_url = base_url or os.getenv("LLM_BASE_URL", "")
-        self.api_key = api_key or os.getenv("LLM_API_KEY", "")
-        self.model = model or os.getenv("LLM_MODEL", "deepseek-chat")
+        self.base_url = base_url or get_env("LLM_BASE_URL")
+        self.api_key = api_key or get_env("LLM_API_KEY")
+        self.model = model or get_env("LLM_MODEL", "deepseek-chat")
         self.temperature = temperature
         self.timeout = timeout
         self._registry = registry

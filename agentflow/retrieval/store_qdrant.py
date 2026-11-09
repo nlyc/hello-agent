@@ -222,24 +222,33 @@ class QdrantVectorStore:
                     limit=top_k,
                     with_payload=True,
                 )
-        hits: list[RetrievalHit] = []
-        for point in points:
-            payload = dict(point.payload or {})
-            metadata = dict(payload.get("metadata") or {})
-            chunk = Chunk(
-                chunk_id=str(payload.get("chunk_id", point.id)),
-                doc_id=str(payload.get("doc_id", "")),
-                namespace=str(payload.get("namespace", "")),
-                text=str(payload.get("text", "")),
-                heading_path=str(payload.get("heading_path", "")),
-                page=payload.get("page"),
-                token_count=int(payload.get("token_count", 0) or 0),
-                content_hash=str(payload.get("content_hash", "")),
-                metadata=metadata,
-                embedding_fingerprint=str(payload.get("embedding_fingerprint", "")),
+        return [
+            RetrievalHit.from_chunk(_chunk_from_point(point), float(point.score))
+            for point in points
+        ]
+
+    def list_chunks(self, namespace: str | None = None) -> list[Chunk]:
+        """通过 scroll 列出命名空间内的全部 chunk（不含向量）。"""
+        client = self._ensure_client()
+        if not client.collection_exists(self.collection):
+            return []
+        filters = {"namespace": namespace} if namespace else {}
+        query_filter = _build_filter(filters)
+        chunks: list[Chunk] = []
+        offset: Any = None
+        while True:
+            records, offset = client.scroll(
+                collection_name=self.collection,
+                scroll_filter=query_filter,
+                limit=256,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
             )
-            hits.append(RetrievalHit.from_chunk(chunk, float(point.score)))
-        return hits
+            chunks.extend(_chunk_from_point(record) for record in records)
+            if offset is None:
+                break
+        return chunks
 
     def content_hashes(
         self, namespace: str | None = None, doc_id: str | None = None
@@ -381,6 +390,23 @@ def _point_id(chunk_id: str) -> str:
         return str(uuid.UUID(chunk_id))
     except (ValueError, AttributeError, TypeError):
         return str(uuid.uuid5(uuid.NAMESPACE_URL, chunk_id))
+
+
+def _chunk_from_point(point: Any) -> Chunk:
+    """把 Qdrant 记录/命中还原为 ``Chunk``（不含向量）。"""
+    payload = dict(point.payload or {})
+    return Chunk(
+        chunk_id=str(payload.get("chunk_id", point.id)),
+        doc_id=str(payload.get("doc_id", "")),
+        namespace=str(payload.get("namespace", "")),
+        text=str(payload.get("text", "")),
+        heading_path=str(payload.get("heading_path", "")),
+        page=payload.get("page"),
+        token_count=int(payload.get("token_count", 0) or 0),
+        content_hash=str(payload.get("content_hash", "")),
+        metadata=dict(payload.get("metadata") or {}),
+        embedding_fingerprint=str(payload.get("embedding_fingerprint", "")),
+    )
 
 
 def _chunk_payload(chunk: Chunk) -> dict[str, Any]:

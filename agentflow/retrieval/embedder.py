@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 import re
 from pathlib import Path
 from typing import Protocol, Sequence
 
+from agentflow.core.env import get_env, project_root
 from agentflow.core.exceptions import RAGError
 
 _CJK_RE = re.compile(r"[一-鿿]+")
@@ -90,7 +92,8 @@ class FastEmbedEmbedder:
     """FastEmbed 语义向量实现（可选依赖，懒加载）。
 
     默认模型 ``BAAI/bge-small-zh-v1.5``，输出 512 维。首次使用会下载模型，
-    缓存目录可用 ``cache_dir`` 或环境变量 ``FASTEMBED_CACHE_PATH`` 指定。
+    缓存目录可用 ``cache_dir`` 或 ``.env`` 的 ``FASTEMBED_CACHE_PATH`` 指定；
+    下载镜像读取 ``HF_ENDPOINT``（默认 ``https://hf-mirror.com``）。
     未安装 ``fastembed`` 时抛 ``RAGError``，不做静默降级。
     """
 
@@ -112,6 +115,15 @@ class FastEmbedEmbedder:
         """按需导入并初始化 FastEmbed 模型。"""
         if self._model is not None:
             return self._model
+        # HF_ENDPOINT 必须在 huggingface_hub 首次导入/下载前生效，
+        # 因此在这里（而非模块导入时）统一读取并写入进程环境。
+        endpoint = get_env("HF_ENDPOINT", "https://hf-mirror.com")
+        if endpoint:
+            os.environ["HF_ENDPOINT"] = endpoint
+        if not self.cache_dir:
+            self.cache_dir = get_env(
+                "FASTEMBED_CACHE_PATH", str(project_root() / ".cache" / "fastembed")
+            )
         try:
             from fastembed import TextEmbedding
         except ImportError as exc:  # pragma: no cover - 环境相关

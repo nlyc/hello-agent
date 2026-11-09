@@ -64,6 +64,72 @@ def _make_chunk(text: str, namespace: str = "travel", doc_id: str = "doc-1") -> 
     )
 
 
+class _FakePoint:
+    """Qdrant 返回记录的最小替身。"""
+
+    def __init__(self, point_id: str, payload: dict) -> None:
+        self.id = point_id
+        self.payload = payload
+
+
+class _FakeClient:
+    """只实现 list_chunks 需要的接口，验证分页与过滤，不联网。"""
+
+    def __init__(self, points: list[_FakePoint]) -> None:
+        self.points = points
+        self.scroll_calls: list[dict] = []
+
+    def collection_exists(self, collection: str) -> bool:
+        return True
+
+    def scroll(self, *, collection_name, scroll_filter, limit, offset, **kwargs):
+        self.scroll_calls.append(
+            {
+                "collection": collection_name,
+                "filter": scroll_filter,
+                "limit": limit,
+                "offset": offset,
+            }
+        )
+        start = int(offset or 0)
+        page = self.points[start : start + limit]
+        next_offset = start + limit
+        if next_offset >= len(self.points):
+            next_offset = None
+        return page, next_offset
+
+
+def test_list_chunks_scrolls_all_pages():
+    pytest.importorskip("qdrant_client")  # 过滤器需要 qdrant_client.models
+    store = QdrantVectorStore("http://127.0.0.1:6333", collection="travel")
+    points = [
+        _FakePoint(f"id-{index}", {"text": f"文本 {index}", "namespace": "travel"})
+        for index in range(300)
+    ]
+    client = _FakeClient(points)
+    store._client = client
+
+    chunks = store.list_chunks("travel")
+
+    assert len(chunks) == 300
+    assert chunks[0].text == "文本 0"
+    assert chunks[-1].text == "文本 299"
+    assert all(chunk.embedding is None for chunk in chunks)
+    assert [call["limit"] for call in client.scroll_calls] == [256, 256]
+    assert client.scroll_calls[0]["offset"] is None
+    assert client.scroll_calls[1]["offset"] == 256
+    assert client.scroll_calls[0]["filter"] is not None
+
+
+def test_list_chunks_without_namespace_has_no_filter():
+    store = QdrantVectorStore("http://127.0.0.1:6333", collection="travel")
+    client = _FakeClient([_FakePoint("id-1", {"text": "文本", "namespace": "travel"})])
+    store._client = client
+
+    assert [chunk.text for chunk in store.list_chunks()] == ["文本"]
+    assert client.scroll_calls[0]["filter"] is None
+
+
 @pytest.mark.skipif(not HAS_QDRANT, reason="未安装 qdrant-client")
 def test_qdrant_roundtrip():
     url = os.environ.get("QDRANT_URL")

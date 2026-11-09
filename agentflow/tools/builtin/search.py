@@ -1,8 +1,12 @@
-"""搜索工具：多源降级链（最优源 → 备选 → 明确报错，不静默失败）。"""
+"""搜索工具：多源降级链（最优源 → 备选 → 明确报错，不静默失败）。
 
-import os
+API Key 与结果条数统一从 ``.env`` 读取（``TAVILY_API_KEY`` /
+``SERPAPI_API_KEY`` / ``SEARCH_MAX_RESULTS``）。
+"""
+
 from typing import Any, Callable, Optional, Sequence
 
+from agentflow.core.env import env_int, get_env
 from agentflow.core.exceptions import ToolError
 from agentflow.tools.base import Tool, ToolParameter
 
@@ -41,7 +45,8 @@ class SearchTool(Tool):
 
     def _default_backends(self) -> list[tuple[str, Callable[[str], str]]]:
         backends: list[tuple[str, Callable[[str], str]]] = []
-        tavily_key = os.getenv("TAVILY_API_KEY")
+        max_results = env_int("SEARCH_MAX_RESULTS", 3)
+        tavily_key = get_env("TAVILY_API_KEY")
         if tavily_key:
             try:
                 from tavily import TavilyClient
@@ -51,13 +56,18 @@ class SearchTool(Tool):
                     (
                         "tavily",
                         lambda q: _format_tavily(
-                            client.search(query=q, search_depth="basic", include_answer=True, max_results=3)
+                            client.search(
+                                query=q,
+                                search_depth="basic",
+                                include_answer=True,
+                                max_results=max_results,
+                            )
                         ),
                     )
                 )
             except ImportError:
                 pass
-        serpapi_key = os.getenv("SERPAPI_API_KEY")
+        serpapi_key = get_env("SERPAPI_API_KEY")
         if serpapi_key:
             try:
                 from serpapi import SerpApiClient

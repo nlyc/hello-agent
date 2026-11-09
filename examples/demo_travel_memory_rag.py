@@ -4,10 +4,13 @@
 
     py -3.14 -m examples.demo_travel_memory_rag --out-dir demo_output
 
-可选语义向量后端（需先安装 extras）：
+可选语义向量后端（需先安装 extras；``--online`` 允许首次联网下载模型）：
 
     py -3.14 -m pip install -e ".[embed]"
-    py -3.14 -m examples.demo_travel_memory_rag --embed fastembed
+    py -3.14 -m examples.demo_travel_memory_rag --embed fastembed --online
+
+向量后端、模型镜像、缓存目录、LLM 与搜索密钥均可写入项目根目录 ``.env``，
+详见 ``.env.example``。
 
 演示内容（a–e）：
     a. ReAct / Reflection / Plan-and-Solve 三范式「无记忆 vs 有记忆」对照；
@@ -897,16 +900,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--embed",
         choices=["hashing", "fastembed"],
-        default="hashing",
-        help="向量后端：默认 hashing（离线），fastembed 需安装 extras",
+        default=None,
+        help="向量后端：hashing（离线，默认）或 fastembed（需安装 extras）；默认读 .env 的 EMBED_BACKEND",
+    )
+    parser.add_argument(
+        "--online",
+        action="store_true",
+        help="联网加载 FastEmbed 模型（等价于 --embed fastembed，首次会下载模型）",
     )
     parser.add_argument("--ingest", default=None, help="额外入库的本地路径或公网 URL")
     parser.add_argument("--query", default=None, help="额外提问（走 RAG 管线）")
     args = parser.parse_args(argv)
 
+    from agentflow.core.env import get_env
+
+    embed_backend = args.embed or get_env("EMBED_BACKEND", "hashing")
+    if args.online:
+        embed_backend = "fastembed"
+
     result = run_demo(
         args.out_dir,
-        embed_backend=args.embed,
+        embed_backend=embed_backend,
         ingest=args.ingest,
         query=args.query,
     )

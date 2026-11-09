@@ -30,11 +30,15 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
+from agentflow.core.config import Config
+from agentflow.llm import OpenAICompatibleLLM
 from agentflow.memory import LongTermMemory, MemoryManager
 from agentflow.retrieval import (
     BM25Index,
     Chunk,
+    FastEmbedEmbedder,
     HashingEmbedder,
+    QdrantVectorStore,
     RAGPipeline,
     SQLiteVectorStore,
     load_document,
@@ -103,6 +107,12 @@ def _clamp_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, number))
 
 
+def _slug(text: str) -> str:
+    """把 fingerprint / 模型名转换为安全的文件名与集合名片段。"""
+    value = re.sub(r"[^A-Za-z0-9_-]+", "-", str(text or "")).strip("-").lower()
+    return value or "default"
+
+
 class WebState:
     """Web 控制台的全部可变状态。
 
@@ -131,26 +141,395 @@ class WebState:
 
         self.lock = threading.RLock()
         self.job_lock = threading.Lock()
-        self.embedder = HashingEmbedder()
-        self.rag_store = SQLiteVectorStore(self.data_dir / "rag.sqlite3")
-        self.bm25 = BM25Index()
-        self.pipeline = RAGPipeline(
-            self.embedder,
-            self.rag_store,
-            self.bm25,
-            namespace=self.namespace,
+        self._seed_enabled = bool(seed)
+        self.config = Config.from_env()
+        self.settings_path = self.data_dir / "settings.json"
+        saved = self._load_settings()
+
+        self.embed_backend = self._pick_embed_backend(
+            saved.get("embed_backend"), self.config.retrieval.embed_backend
         )
-        self.long_term = LongTermMemory(
-            self.embedder,
-            path=self.data_dir / "memory.sqlite3",
-            user_id=self.user_id,
+        self.vector_store_kind = self._pick_vector_store(
+            saved.get("vector_store"), self.config.retrieval.vector_store
         )
-        self.memory = MemoryManager(self.embedder, self.long_term, user_id=self.user_id)
+        self.store_error: str | None = None
+        try:
+            stack = self._build_stack(self.embed_backend, self.vector_store_kind)
+        except Exception as exc:
+            if self.vector_store_kind != "sqlite":
+                # 远程向量库无法初始化时退回 SQLite，保证控制台仍可用。
+                self.store_error = str(exc)
+                self.vector_store_kind = "sqlite"
+                stack = self._build_stack(self.embed_backend, "sqlite")
+            else:
+                raise
+        self._apply_stack(stack)
         self.documents: list[dict[str, Any]] = self._load_manifest()
 
         if seed:
             with self.lock:
-                self._seed()
+                try:
+                    self._seed()
+                except Exception as exc:
+                    if self.embed_backend == "hashing" and self.vector_store_kind == "sqlite":
+                        raise
+                    # 配置的 FastEmbed / Qdrant 不可用时退回完全离线的组合，
+                    # 保证控制台仍能启动并在页面上提示原因。
+                    self.store_error = (
+                        f"初始化 {self.embed_backend}/{self.vector_store_kind} 失败，"
+                        f"已退回 hashing/sqlite：{exc}"
+                    )
+                    old_stack = self._current_stack()
+                    self.embed_backend = "hashing"
+                    self.vector_store_kind = "sqlite"
+                    self._apply_stack(self._build_stack("hashing", "sqlite"))
+                    self._close_stack(old_stack)
+                    self.documents = self._load_manifest()
+                    self._seed()
+                self._save_settings()
+
+    # --- 配置化组件与后端切换 ---------------------------------------------
+
+    def _load_settings(self) -> dict[str, Any]:
+        """读取上次在页面上选择的后端；文件损坏时忽略。"""
+        try:
+            payload = json.loads(self.settings_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _save_settings(self) -> None:
+        """持久化运行时选择，重启后继续沿用。"""
+        payload = {
+            "embed_backend": self.embed_backend,
+            "vector_store": self.vector_store_kind,
+        }
+        temp = self.settings_path.with_suffix(".json.tmp")
+        temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp.replace(self.settings_path)
+
+    @staticmethod
+    def _pick_embed_backend(saved: Any, configured: str) -> str:
+        """选择 embedding 后端：页面保存值 > .env > hashing。"""
+        for value in (saved, configured):
+            backend = str(value or "").strip().lower()
+            if backend in {"hashing", "fastembed"}:
+                return backend
+        return "hashing"
+
+    @staticmethod
+    def _pick_vector_store(saved: Any, configured: str) -> str:
+        """选择向量库：页面保存值 > .env > sqlite。"""
+        for value in (saved, configured):
+            kind = str(value or "").strip().lower()
+            if kind in {"sqlite", "qdrant"}:
+                return kind
+        return "sqlite"
+
+    def _stack_key(self) -> str:
+        """按 embedding 后端隔离存储文件 / Qdrant 集合的稳定后缀。"""
+        if self.embed_backend == "hashing":
+            return "hashing"
+        return _slug(f"fastembed-{self.config.retrieval.fastembed_model}")
+
+    def _sqlite_path(self) -> Path:
+        """不同 embedding 使用独立 SQLite 文件，避免指纹/维度冲突。"""
+        if self.embed_backend == "hashing":
+            return self.data_dir / "rag.sqlite3"
+        return self.data_dir / f"rag-{self._stack_key()}.sqlite3"
+
+    def _memory_path(self) -> Path:
+        """长期记忆同样按 embedding 后端隔离。"""
+        if self.embed_backend == "hashing":
+            return self.data_dir / "memory.sqlite3"
+        return self.data_dir / f"memory-{self._stack_key()}.sqlite3"
+
+    def _qdrant_collection(self) -> str:
+        """集合名带后端后缀，Hashing 与 FastEmbed 的向量不会混用。"""
+        base = self.config.qdrant.collection or "agentflow"
+        name = f"{base}_{self._stack_key()}"
+        return name[:200]
+
+    def _build_store(self, embedder: Any, kind: str) -> Any:
+        """按配置创建向量库。"""
+        if kind == "qdrant":
+            qdrant = self.config.qdrant
+            if not qdrant.url:
+                raise ApiError("启用 Qdrant 需要先配置 QDRANT_URL", 400)
+            return QdrantVectorStore(
+                qdrant.url,
+                api_key=qdrant.api_key or None,
+                collection=self._qdrant_collection(),
+                dimension=embedder.dimension,
+                timeout=qdrant.timeout,
+                prefer_grpc=qdrant.prefer_grpc,
+            )
+        return SQLiteVectorStore(self._sqlite_path())
+
+    def _build_stack(self, embed_backend: str, vector_store_kind: str) -> dict[str, Any]:
+        """按指定后端构建一整套互不干扰的检索 / 记忆组件。"""
+        if embed_backend == "fastembed":
+            embedder: Any = FastEmbedEmbedder(
+                model=self.config.retrieval.fastembed_model,
+                cache_dir=self.config.retrieval.fastembed_cache_path or None,
+            )
+        elif embed_backend == "hashing":
+            embedder = HashingEmbedder()
+        else:
+            raise ApiError("embed_backend 必须是 hashing 或 fastembed")
+        store = self._build_store(embedder, vector_store_kind)
+        bm25 = BM25Index()
+        pipeline = RAGPipeline(embedder, store, bm25, namespace=self.namespace)
+        long_term = LongTermMemory(
+            embedder, path=self._memory_path(), user_id=self.user_id
+        )
+        memory = MemoryManager(embedder, long_term, user_id=self.user_id)
+        return {
+            "embedder": embedder,
+            "rag_store": store,
+            "bm25": bm25,
+            "pipeline": pipeline,
+            "long_term": long_term,
+            "memory": memory,
+        }
+
+    def _apply_stack(self, stack: dict[str, Any]) -> None:
+        """把组件挂到实例上（与旧字段名保持一致）。"""
+        self.embedder = stack["embedder"]
+        self.rag_store = stack["rag_store"]
+        self.bm25 = stack["bm25"]
+        self.pipeline = stack["pipeline"]
+        self.long_term = stack["long_term"]
+        self.memory = stack["memory"]
+
+    def _current_stack(self) -> dict[str, Any]:
+        """返回当前组件快照，便于切换时统一关闭旧连接。"""
+        return {
+            "embedder": self.embedder,
+            "rag_store": self.rag_store,
+            "bm25": self.bm25,
+            "pipeline": self.pipeline,
+            "long_term": self.long_term,
+            "memory": self.memory,
+        }
+
+    @staticmethod
+    def _close_stack(stack: dict[str, Any]) -> None:
+        """关闭旧组件持有的连接，忽略重复关闭。"""
+        for key in ("long_term", "rag_store"):
+            target = stack.get(key)
+            close = getattr(target, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+
+    def _migrate_memories(self, old_long_term: Any) -> int:
+        """切换 embedding 后把旧长期记忆复制到新库（向量重新生成）。"""
+        if old_long_term is None or old_long_term is self.long_term:
+            return 0
+        try:
+            items = old_long_term.search("", top_k=old_long_term.count())
+        except Exception:
+            return 0
+        copied = 0
+        for hit in items:
+            try:
+                self.long_term.add(
+                    hit.content,
+                    memory_type=hit.memory_type,
+                    importance=hit.importance,
+                    metadata=dict(hit.metadata or {}),
+                    memory_id=hit.memory_id,
+                )
+                copied += 1
+            except Exception:
+                continue
+        return copied
+
+    def _source_candidates(self, entry: dict[str, Any]) -> list[Path]:
+        """根据清单条目推断源文件路径（上传 / URL / 内置文档）。"""
+        raw = str(entry.get("source_uri") or entry.get("source") or "").strip()
+        if not raw:
+            return []
+        path = Path(raw)
+        candidates = [path] if path.is_absolute() else []
+        name = Path(raw).name
+        candidates.extend(
+            [
+                self.data_dir / raw,
+                self.uploads_dir / raw,
+                self.uploads_dir / name,
+                self.knowledge_dir / name,
+            ]
+        )
+        return candidates
+
+    def _reindex_documents(self) -> list[str]:
+        """切换后端后按清单重新入库全部文档，并重建 BM25。"""
+        self.bm25.clear()
+        self._ingest_builtin_docs()
+        builtin_ids = {item["doc_id"] for item in KNOWLEDGE_DOCS}
+        failed: list[str] = []
+        for entry in list(self.documents):
+            if entry.get("doc_id") in builtin_ids:
+                continue
+            target = next(
+                (path for path in self._source_candidates(entry) if path.is_file()),
+                None,
+            )
+            if target is None:
+                failed.append(str(entry.get("title") or entry.get("doc_id")))
+                continue
+            try:
+                self.pipeline.ingest(
+                    str(target),
+                    namespace=self.namespace,
+                    title=entry.get("title") or None,
+                    metadata={"origin": str(entry.get("source") or "")},
+                )
+            except Exception:
+                failed.append(str(entry.get("title") or entry.get("doc_id")))
+        self._rebuild_bm25()
+        return failed
+
+    def settings(self) -> dict[str, Any]:
+        """返回可公开的当前配置（不含任何密钥明文）。"""
+        config = self.config
+        return {
+            "embed_backend": self.embed_backend,
+            "vector_store": self.vector_store_kind,
+            "embedding_fingerprint": self.embedder.fingerprint,
+            "fastembed_model": config.retrieval.fastembed_model,
+            "fastembed_cache_path": config.retrieval.fastembed_cache_path,
+            "hf_endpoint": config.retrieval.hf_endpoint,
+            "sqlite": self._sqlite_usage(),
+            "qdrant": {
+                "configured": bool(config.qdrant.url),
+                "url": config.qdrant.url,
+                "collection": self._qdrant_collection(),
+                "prefer_grpc": config.qdrant.prefer_grpc,
+            },
+            "llm": {
+                "configured": bool(config.llm.api_key),
+                "model": config.llm.model,
+                "base_url": config.llm.base_url,
+            },
+            "search": {
+                "tavily_configured": bool(config.search.tavily_api_key),
+                "serpapi_configured": bool(config.search.serpapi_api_key),
+                "max_results": config.search.max_results,
+            },
+            "store_error": self.store_error,
+        }
+
+    def _sqlite_usage(self) -> dict[str, Any]:
+        """统计数据目录下 SQLite 文件占用（含 WAL/SHM 辅助文件）。"""
+        files = []
+        total = 0
+        for path in sorted(self.data_dir.glob("*.sqlite3*")):
+            try:
+                size = path.stat().st_size
+            except OSError:
+                continue
+            total += size
+            files.append({"name": path.name, "bytes": size})
+        return {
+            "files": files,
+            "total_bytes": total,
+            "total_mb": round(total / (1024 * 1024), 2),
+        }
+
+    def switch_embed_backend(self, backend: str) -> dict[str, Any]:
+        """在线切换 embedding 后端：自动切换存储并重建索引。"""
+        backend = str(backend or "").strip().lower()
+        if backend not in {"hashing", "fastembed"}:
+            raise ApiError("embed_backend 必须是 hashing 或 fastembed")
+        with self.lock:
+            if backend == self.embed_backend:
+                return {"changed": False, "settings": self.settings()}
+
+            self.config = Config.from_env()
+            target_backend = backend
+            old_stack = self._current_stack()
+            previous_backend = self.embed_backend
+            self.embed_backend = target_backend
+            try:
+                stack = self._build_stack(target_backend, self.vector_store_kind)
+                # FastEmbed 首次使用需要下载/加载模型；先预热，失败则不动旧索引。
+                if target_backend == "fastembed":
+                    stack["embedder"].embed_query("预热")
+                stack["rag_store"].count(self.namespace)
+            except Exception as exc:
+                self.embed_backend = previous_backend
+                raise ApiError(f"切换到 {target_backend} 失败：{exc}") from exc
+
+            self._apply_stack(stack)
+            migrated = 0
+            if self.long_term.count() == 0:
+                migrated = self._migrate_memories(old_stack["long_term"])
+                if migrated == 0 and self._seed_enabled:
+                    seed_memory(self.memory)
+            self._close_stack(old_stack)
+            failed = self._reindex_documents()
+            self.store_error = None
+            self._save_settings()
+            return {
+                "changed": True,
+                "from": previous_backend,
+                "to": target_backend,
+                "migrated_memories": migrated,
+                "failed_documents": failed,
+                "settings": self.settings(),
+                "stats": self.pipeline.stats(),
+            }
+
+    def switch_vector_store(self, kind: str) -> dict[str, Any]:
+        """在线切换 SQLite / Qdrant 向量库，并重建索引。"""
+        kind = str(kind or "").strip().lower()
+        if kind not in {"sqlite", "qdrant"}:
+            raise ApiError("vector_store 必须是 sqlite 或 qdrant")
+        with self.lock:
+            if kind == self.vector_store_kind:
+                return {"changed": False, "settings": self.settings()}
+            self.config = Config.from_env()
+            previous = self.vector_store_kind
+            try:
+                store = self._build_store(self.embedder, kind)
+                store.count(self.namespace)
+            except Exception as exc:
+                raise ApiError(f"切换到 {kind} 失败：{exc}") from exc
+
+            old_store = self.rag_store
+            old_bm25 = self.bm25
+            bm25 = BM25Index()
+            self.rag_store = store
+            self.bm25 = bm25
+            self.pipeline = RAGPipeline(
+                self.embedder, store, bm25, namespace=self.namespace
+            )
+            self.vector_store_kind = kind
+            self.store_error = None
+            try:
+                failed = self._reindex_documents()
+            finally:
+                close = getattr(old_store, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception:
+                        pass
+                del old_bm25
+            self._save_settings()
+            return {
+                "changed": True,
+                "from": previous,
+                "to": kind,
+                "failed_documents": failed,
+                "settings": self.settings(),
+                "stats": self.pipeline.stats(),
+            }
 
     # --- 初始化与清单 -----------------------------------------------------
 
@@ -186,8 +565,8 @@ class WebState:
         self._save_manifest()
         return entry
 
-    def _seed(self) -> None:
-        """首次启动时写入内置知识库与演示记忆。"""
+    def _ingest_builtin_docs(self) -> None:
+        """写入/重建内置知识库文档（内容未变时由管线自动跳过）。"""
         for item in KNOWLEDGE_DOCS:
             path = self.knowledge_dir / f"{item['doc_id']}.md"
             if not path.exists():
@@ -204,6 +583,10 @@ class WebState:
                 continue
             self._record_document(result, display_source=path.name)
 
+    def _seed(self) -> None:
+        """首次启动时写入内置知识库与演示记忆。"""
+        self._ingest_builtin_docs()
+
         if self.long_term.count() == 0:
             seed_memory(self.memory)
 
@@ -211,10 +594,16 @@ class WebState:
             self._rebuild_bm25()
 
     def _rebuild_bm25(self) -> None:
-        """进程重启后按持久化向量库重建内存 BM25 索引。"""
+        """按已持久化的向量库重建内存 BM25 索引。"""
         total = self.rag_store.count(self.namespace)
         if total <= 0:
             return
+        self.bm25.clear()
+        lister = getattr(self.rag_store, "list_chunks", None)
+        if callable(lister):
+            self.bm25.add(lister(self.namespace))
+            return
+        # 兜底：旧版向量库没有 list_chunks 时用零向量枚举。
         probe = [0.0] * len(self.embedder.embed_query(""))
         hits = self.rag_store.search(
             probe, top_k=total, filters={"namespace": self.namespace}
@@ -245,6 +634,7 @@ class WebState:
                 "user_id": self.user_id,
                 "data_dir": str(self.data_dir),
                 "rag": self.pipeline.stats(),
+                "settings": self.settings(),
                 "memory": self.memory.stats(),
                 "documents": len(self.documents),
                 "presets": {
@@ -383,21 +773,83 @@ class WebState:
                 "context": self.pipeline.build_context(hits),
             }
 
+    def _select_llm(
+        self, mode: str
+    ) -> tuple[Any | None, str, str | None, str | None]:
+        """按模式选择回答后端：online / offline / retrieval。
+
+        返回 ``(llm, backend, model, notice)``。``auto`` 在配置了
+        ``LLM_API_KEY`` 时使用在线模型，否则回落到离线 Demo LLM。
+        """
+        if mode == "none":
+            return None, "retrieval", None, None
+        # 每次回答重新读取 .env，修改 Key / 模型后无需重启服务。
+        config = Config.from_env()
+        self.config = config
+        if not config.llm.api_key:
+            if mode == "online":
+                raise ApiError(
+                    "未配置 LLM_API_KEY，无法使用在线回答；请在项目根目录 .env 中填写"
+                )
+            return (
+                TravelDemoLLM(),
+                "offline",
+                None,
+                "未配置 LLM_API_KEY，已使用离线 Demo LLM",
+            )
+        llm = OpenAICompatibleLLM(
+            base_url=config.llm.base_url or None,
+            api_key=config.llm.api_key,
+            model=config.llm.model or None,
+            temperature=config.llm.temperature,
+            timeout=config.llm.timeout,
+        )
+        return llm, "online", config.llm.model, None
+
     def answer(
-        self, question: str, top_k: int = 5, use_llm: bool = True
+        self,
+        question: str,
+        top_k: int = 5,
+        use_llm: bool = True,
+        llm_mode: str | None = None,
     ) -> dict[str, Any]:
-        """基于检索结果生成带引用的回答。"""
+        """基于检索结果生成带引用的回答。
+
+        ``llm_mode`` 优先：``auto``（有 Key 用在线，否则离线）、``online``、
+        ``offline``、``none``（仅抽取式）。未提供时保持旧行为（离线性）。
+        """
         question = str(question or "").strip()
         if not question:
             raise ApiError("问题不能为空")
         limit = _clamp_int(top_k, 5, 1, 20)
+        mode = str(llm_mode or "").strip().lower()
+        if mode not in {"auto", "online", "offline", "none"}:
+            mode = "offline" if use_llm else "none"
+        llm, backend, model, notice = self._select_llm(mode)
+        error: str | None = notice
         with self.lock:
-            result = self.pipeline.answer(
-                question,
-                llm=TravelDemoLLM() if use_llm else None,
-                top_k=limit,
+            try:
+                result = self.pipeline.answer(question, llm=llm, top_k=limit)
+            except Exception as exc:
+                if backend != "online":
+                    raise ApiError(f"生成回答失败：{exc}") from exc
+                # 在线调用失败时回落到离线，保证页面仍可演示。
+                error = f"在线模型调用失败，已回落离线 Demo LLM：{exc}"
+                result = self.pipeline.answer(
+                    question, llm=TravelDemoLLM(), top_k=limit
+                )
+                backend, model = "offline", None
+            data = result.to_dict()
+            data.update(
+                {
+                    "llm_mode": mode,
+                    "llm_backend": backend,
+                    "llm_model": model,
+                }
             )
-            return result.to_dict()
+            if error:
+                data["llm_error"] = error
+            return data
 
     # --- 记忆 -------------------------------------------------------------
 
@@ -835,6 +1287,9 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/api/status":
             self._send_json(state.status())
             return
+        if method == "GET" and path == "/api/settings":
+            self._send_json(state.settings())
+            return
         if method == "GET" and path == "/api/documents":
             self._send_json(state.list_documents())
             return
@@ -884,7 +1339,18 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     str(payload.get("question") or ""),
                     payload.get("top_k", 5),
                     bool(payload.get("use_llm", True)),
+                    payload.get("llm_mode"),
                 )
+            )
+            return
+        if method == "POST" and path == "/api/settings/embed":
+            self._send_json(
+                state.switch_embed_backend(str(payload.get("backend") or ""))
+            )
+            return
+        if method == "POST" and path == "/api/settings/vector":
+            self._send_json(
+                state.switch_vector_store(str(payload.get("backend") or ""))
             )
             return
         if method == "POST" and path == "/api/documents/clear":

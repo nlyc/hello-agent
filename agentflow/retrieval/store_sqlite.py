@@ -261,6 +261,31 @@ class SQLiteVectorStore:
             rows = self._conn.execute(sql, params).fetchall()
         return {row["content_hash"] for row in rows}
 
+    def list_chunks(self, namespace: str | None = None) -> list[Chunk]:
+        """列出命名空间内的全部 chunk（不含向量），用于重建 BM25 等内存索引。"""
+        sql = "SELECT * FROM chunks"
+        params: list[Any] = []
+        if namespace is not None:
+            sql += " WHERE namespace = ?"
+            params.append(namespace)
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [
+            Chunk(
+                chunk_id=row["chunk_id"],
+                doc_id=row["doc_id"],
+                namespace=row["namespace"],
+                text=row["text"],
+                heading_path=row["heading_path"],
+                page=row["page"],
+                token_count=row["token_count"],
+                content_hash=row["content_hash"],
+                metadata=_load_metadata(row["metadata"]),
+                embedding_fingerprint=row["embedding_fingerprint"],
+            )
+            for row in rows
+        ]
+
     def close(self) -> None:
         """关闭数据库连接（可重复调用）。"""
         with self._lock:

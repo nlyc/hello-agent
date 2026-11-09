@@ -11,8 +11,20 @@ from pathlib import Path
 
 import pytest
 
+from examples import web_app
 from examples.demo_travel_memory_rag import KNOWLEDGE_DOCS
 from examples.web_app import WebState, make_server
+from agentflow.retrieval import HashingEmbedder
+
+
+class _FakeFastEmbedEmbedder(HashingEmbedder):
+    """测试用 FastEmbed 替身：不加载模型，仅模拟不同指纹。"""
+
+    def __init__(self, model="BAAI/bge-small-zh-v1.5", cache_dir=None, dimension=512):
+        super().__init__(dimension)
+        self.model = model
+        self.cache_dir = str(cache_dir) if cache_dir is not None else None
+        self.fingerprint = f"fastembed:{model}:{dimension}"
 
 
 @pytest.fixture()
@@ -152,6 +164,144 @@ def test_search_rejects_empty_query(console):
     )
     assert status == 400
     assert "error" in json.loads(body.decode("utf-8"))
+
+
+# --------------------------------------------------------------------- 检索配置
+
+
+def test_settings_endpoint(console):
+    base, _ = console
+    payload = _json(base, "/api/settings")
+
+    assert payload["embed_backend"] == "hashing"
+    assert payload["vector_store"] == "sqlite"
+    assert payload["embedding_fingerprint"].startswith("hashing:char-ngram:")
+    assert payload["llm"]["configured"] is False
+    assert payload["search"]["tavily_configured"] is False
+    assert payload["qdrant"]["configured"] is False
+    assert payload["sqlite"]["total_bytes"] > 0
+    assert any(file["name"].endswith(".sqlite3") for file in payload["sqlite"]["files"])
+    assert payload["store_error"] is None
+
+    # 响应不得包含任何密钥字段的明文。
+    text = json.dumps(payload, ensure_ascii=False)
+    assert "api_key" not in text
+    assert "api-key" not in text
+
+
+def test_switch_embed_backend_rebuilds_and_persists(console, monkeypatch):
+    base, state = console
+    monkeypatch.setattr(web_app, "FastEmbedEmbedder", _FakeFastEmbedEmbedder)
+
+    payload = _json(
+        base, "/api/settings/embed", method="POST", payload={"backend": "fastembed"}
+    )
+    assert payload["changed"] is True
+    assert payload["from"] == "hashing"
+    assert payload["to"] == "fastembed"
+    assert payload["migrated_memories"] >= 2
+    assert payload["failed_documents"] == []
+    assert payload["stats"]["chunks"] >= len(KNOWLEDGE_DOCS)
+    assert payload["settings"]["embed_backend"] == "fastembed"
+    assert payload["settings"]["embedding_fingerprint"].startswith("fastembed:")
+
+    # 索引与记忆在新后端下仍可用。
+    hits = _json(
+        base,
+        "/api/search",
+        method="POST",
+        payload={"query": "北京下雨天适合去哪？", "top_k": 3},
+    )["hits"]
+    assert hits
+    memory = _json(base, "/api/memory")
+    assert memory["stats"]["long_term"]["memories"] >= 2
+
+    # 选择写入 settings.json，重启后沿用。
+    saved = json.loads(state.settings_path.read_text(encoding="utf-8"))
+    assert saved == {"embed_backend": "fastembed", "vector_store": "sqlite"}
+
+    # 切到同一后端是幂等操作。
+    same = _json(
+        base, "/api/settings/embed", method="POST", payload={"backend": "fastembed"}
+    )
+    assert same["changed"] is False
+
+
+def test_switch_embed_backend_rejects_unknown(console):
+    base, _ = console
+    status, _, body = _request(
+        base, "/api/settings/embed", method="POST", payload={"backend": "openai"}
+    )
+    assert status == 400
+    assert "hashing" in json.loads(body.decode("utf-8"))["error"]
+
+
+def test_switch_vector_store_requires_qdrant_url(console):
+    base, _ = console
+    status, _, body = _request(
+        base, "/api/settings/vector", method="POST", payload={"backend": "qdrant"}
+    )
+    assert status == 400
+    assert "QDRANT_URL" in json.loads(body.decode("utf-8"))["error"]
+
+
+def test_answer_llm_modes_without_key(console, monkeypatch):
+    base, _ = console
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+
+    auto = _json(
+        base,
+        "/api/answer",
+        method="POST",
+        payload={"question": "北京有哪些景点？", "llm_mode": "auto"},
+    )
+    assert auto["llm_backend"] == "offline"
+    assert auto["llm_error"]
+    assert auto["citations"]
+
+    none = _json(
+        base,
+        "/api/answer",
+        method="POST",
+        payload={"question": "北京有哪些景点？", "llm_mode": "none"},
+    )
+    assert none["llm_backend"] == "retrieval"
+    assert "llm_error" not in none or not none["llm_error"]
+
+    offline = _json(
+        base,
+        "/api/answer",
+        method="POST",
+        payload={"question": "北京有哪些景点？", "llm_mode": "offline"},
+    )
+    assert offline["llm_backend"] == "offline"
+
+    status, _, body = _request(
+        base,
+        "/api/answer",
+        method="POST",
+        payload={"question": "北京有哪些景点？", "llm_mode": "online"},
+    )
+    assert status == 400
+    assert "LLM_API_KEY" in json.loads(body.decode("utf-8"))["error"]
+
+
+def test_select_llm_uses_online_when_key_configured(console, monkeypatch):
+    _, state = console
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_MODEL", "test-model")
+    monkeypatch.setenv("LLM_BASE_URL", "https://relay.example.com/v1")
+
+    llm, backend, model, notice = state._select_llm("auto")
+    assert backend == "online"
+    assert model == "test-model"
+    assert notice is None
+    assert llm is not None
+    assert llm.api_key == "test-key"
+
+    llm, backend, _, _ = state._select_llm("none")
+    assert backend == "retrieval"
+    assert llm is None
 
 
 # --------------------------------------------------------------------- 上传与删除

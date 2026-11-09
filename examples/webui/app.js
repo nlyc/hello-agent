@@ -7,6 +7,7 @@
   const state = {
     loaded: new Set(),
     health: null,
+    settings: null,
   };
 
   // ---------------------------------------------------------------- 基础工具
@@ -289,6 +290,9 @@
     $('#env-datadir').textContent = data.data_dir || '—';
     $('#env-fingerprint').textContent = rag.embedding_fingerprint || '—';
     $('#env-chunk').textContent = `${rag.chunk_tokens ?? '—'} tokens / overlap ${rag.chunk_overlap ?? '—'}`;
+    $('#stat-dim-sub').textContent = (data.settings || {}).embed_backend || '—';
+
+    if (data.settings) renderSettings(data.settings);
 
     const pill = $('#env-pill');
     pill.className = 'pill pill-ok';
@@ -306,6 +310,110 @@
     if (presets.main_question) {
       $('#answer-question').placeholder = `例如：${presets.main_question}`;
     }
+  }
+
+  // ------------------------------------------------------------ 检索与在线配置
+
+  function renderSettings(settings) {
+    state.settings = settings;
+    const embedSelect = $('#settings-embed');
+    const vectorSelect = $('#settings-vector');
+    if (embedSelect) embedSelect.value = settings.embed_backend || 'hashing';
+    if (vectorSelect) vectorSelect.value = settings.vector_store || 'sqlite';
+
+    $('#settings-fingerprint').textContent = settings.embedding_fingerprint || '—';
+
+    const llm = settings.llm || {};
+    $('#settings-llm').textContent = llm.configured
+      ? `已配置 · ${llm.model || '默认模型'}${llm.base_url ? ` · ${llm.base_url}` : ''}`
+      : '未配置（在 .env 填写 LLM_API_KEY / LLM_MODEL）';
+
+    const search = settings.search || {};
+    const searchFlags = [
+      search.tavily_configured ? 'Tavily 已配置' : '',
+      search.serpapi_configured ? 'SerpAPI 已配置' : '',
+    ].filter(Boolean);
+    $('#settings-search').textContent = searchFlags.length
+      ? `${searchFlags.join(' · ')} · 最多 ${search.max_results ?? '—'} 条`
+      : '未配置（在 .env 填写 TAVILY_API_KEY 或 SERPAPI_API_KEY）';
+
+    const sqlite = settings.sqlite || {};
+    const files = sqlite.files || [];
+    $('#settings-sqlite').textContent = files.length
+      ? `${Number(sqlite.total_mb || 0).toFixed(2)} MB · ${files
+          .map((file) => `${file.name} ${bytes(file.bytes)}`)
+          .join(' / ')}`
+      : '暂无 SQLite 文件';
+
+    const qdrant = settings.qdrant || {};
+    $('#settings-qdrant').textContent = qdrant.configured
+      ? `${qdrant.url} · 集合 ${qdrant.collection}`
+      : '未配置 QDRANT_URL';
+
+    const pill = $('#settings-pill');
+    const error = $('#settings-error');
+    if (settings.store_error) {
+      pill.className = 'pill pill-err';
+      pill.textContent = '已降级';
+      error.textContent = settings.store_error;
+      error.classList.remove('hidden');
+    } else {
+      pill.className = 'pill pill-ok';
+      pill.textContent = `${settings.embed_backend || '—'} / ${settings.vector_store || '—'}`;
+      error.textContent = '';
+      error.classList.add('hidden');
+    }
+  }
+
+  async function loadSettings() {
+    const settings = await api('/api/settings');
+    renderSettings(settings);
+    return settings;
+  }
+
+  function switchSummary(result) {
+    const parts = [];
+    if (!result || result.changed === false) return '配置未变化';
+    if (result.migrated_memories) parts.push(`迁移记忆 ${result.migrated_memories} 条`);
+    const failed = result.failed_documents || [];
+    if (failed.length) parts.push(`需手动重新入库 ${failed.length} 个文档`);
+    return parts.join(' · ') || '索引已重建';
+  }
+
+  async function applySettings(event) {
+    event.preventDefault();
+    const button = event.submitter || $('#settings-form button');
+    await withBusy(button, '切换中…（重建索引）', async () => {
+      const messages = [];
+      if (!state.settings) await loadSettings();
+
+      const embed = $('#settings-embed').value;
+      if (embed !== state.settings.embed_backend) {
+        const result = await api('/api/settings/embed', {
+          method: 'POST',
+          body: { backend: embed },
+        });
+        if (result.changed) messages.push(`Embedding → ${result.to}，${switchSummary(result)}`);
+        if (result.settings) renderSettings(result.settings);
+      }
+
+      const vector = $('#settings-vector').value;
+      if (vector !== state.settings.vector_store) {
+        const result = await api('/api/settings/vector', {
+          method: 'POST',
+          body: { backend: vector },
+        });
+        if (result.changed) messages.push(`向量库 → ${result.to}，${switchSummary(result)}`);
+        if (result.settings) renderSettings(result.settings);
+      }
+
+      await loadStatus();
+      state.loaded.add('overview');
+      state.loaded.delete('knowledge');
+      state.loaded.delete('memory');
+      await refreshDocuments().catch(reason);
+      toast(messages.length ? messages.join('；') : '配置未变化');
+    }).catch(reason);
   }
 
   // ------------------------------------------------------------------ 知识库
@@ -474,12 +582,14 @@
       return;
     }
     await withBusy(event.submitter || $('#answer-form button'), '生成中…', async () => {
+      const mode = $('#answer-llm').value;
       const data = await api('/api/answer', {
         method: 'POST',
         body: {
           question,
           top_k: Number($('#answer-topk').value) || 5,
-          use_llm: $('#answer-llm').checked,
+          use_llm: mode !== 'none',
+          llm_mode: mode,
         },
       });
       const citations = (data.citations || [])
@@ -488,13 +598,31 @@
       const hits = (data.hits || [])
         .map((hit, index) => hitHtml(hit, index + 1))
         .join('');
+      const backendLabel = {
+        online: `在线 LLM${data.llm_model ? ` · ${data.llm_model}` : ''}`,
+        offline: '离线 Demo LLM',
+        retrieval: '仅检索（无 LLM）',
+      }[data.llm_backend] || data.llm_backend || '—';
+      const error = data.llm_error
+        ? `<p class="callout">${esc(data.llm_error)}</p>`
+        : '';
+      $('#answer-mode-hint').textContent = backendLabel;
       $('#answer-result').innerHTML = `
         <div class="answer-box">
           <p>${esc(data.answer || '（空回答）')}</p>
           <div class="citations">${citations || '<span>无引用</span>'}</div>
+          <div class="hit-meta">回答后端：${esc(backendLabel)}</div>
         </div>
+        ${error}
         ${hits}`;
-      toast(data.has_answer ? '已生成带引用的回答' : '未找到依据，已给出兜底回答');
+      toast(
+        data.llm_error
+          ? '在线模型不可用，已回落离线回答'
+          : data.has_answer
+            ? '已生成带引用的回答'
+            : '未找到依据，已给出兜底回答',
+        data.llm_error ? 'err' : 'ok'
+      );
     }).catch(reason);
   }
 
@@ -915,6 +1043,7 @@
     });
 
     $('#upload-form').addEventListener('submit', ingestUpload);
+    $('#settings-form').addEventListener('submit', applySettings);
     $('#url-form').addEventListener('submit', ingestUrl);
     $('#clear-docs').addEventListener('click', clearDocuments);
     $('#doc-rows').addEventListener('click', (event) => {

@@ -39,7 +39,7 @@
       <article class="stat"><span class="stat-label">Chunks</span><strong id="stat-chunks">—</strong><span class="stat-sub">向量 + BM25</span></article>
       <article class="stat"><span class="stat-label">长期记忆</span><strong id="stat-memories">—</strong><span class="stat-sub">SQLite 持久化</span></article>
       <article class="stat"><span class="stat-label">工作记忆</span><strong id="stat-working">—</strong><span class="stat-sub">进程内</span></article>
-      <article class="stat"><span class="stat-label">向量维度</span><strong id="stat-dim">—</strong><span class="stat-sub">HashingEmbedder</span></article>
+      <article class="stat"><span class="stat-label">向量维度</span><strong id="stat-dim">—</strong><span class="stat-sub" id="stat-dim-sub">—</span></article>
       <article class="stat"><span class="stat-label">BM25 条目</span><strong id="stat-bm25">—</strong><span class="stat-sub">稀疏索引</span></article>
     </div>
 
@@ -72,6 +72,36 @@ py -3.14 -m pytest -q</pre>
           <dt>分块参数</dt><dd id="env-chunk">—</dd>
         </dl>
         <p class="hint">数据保存在 <span class="mono">.data/webui</span>，重启服务后文档索引、长期记忆与 Demo 产物都会保留。</p>
+      </article>
+
+      <article class="card">
+        <header class="card-head"><h2>检索与在线能力</h2><span id="settings-pill" class="pill">—</span></header>
+        <form id="settings-form" class="form-row">
+          <label class="field grow">
+            <span>Embedding 后端</span>
+            <select id="settings-embed">
+              <option value="hashing">hashing（离线，零依赖）</option>
+              <option value="fastembed">fastembed（在线语义，首次下载模型）</option>
+            </select>
+          </label>
+          <label class="field grow">
+            <span>向量库</span>
+            <select id="settings-vector">
+              <option value="sqlite">SQLite（本地文件）</option>
+              <option value="qdrant">Qdrant（远程服务）</option>
+            </select>
+          </label>
+          <button class="primary-btn" type="submit">切换并重建索引</button>
+        </form>
+        <dl class="kv">
+          <dt>Embedding 指纹</dt><dd id="settings-fingerprint" class="mono wrap">—</dd>
+          <dt>在线 LLM</dt><dd id="settings-llm">—</dd>
+          <dt>联网搜索</dt><dd id="settings-search">—</dd>
+          <dt>SQLite 占用</dt><dd id="settings-sqlite">—</dd>
+          <dt>Qdrant</dt><dd id="settings-qdrant" class="mono wrap">—</dd>
+        </dl>
+        <p id="settings-error" class="callout hidden"></p>
+        <p class="hint">切换会自动重建索引、迁移长期记忆，并把选择保存到 <span class="mono">.data/webui/settings.json</span>。FastEmbed 首次加载需联网下载模型；Qdrant 需先在 <span class="mono">.env</span> 配置 <span class="mono">QDRANT_URL</span> / <span class="mono">QDRANT_API_KEY</span>。</p>
       </article>
     </div>
   </section>
@@ -143,11 +173,20 @@ py -3.14 -m pytest -q</pre>
         </article>
 
         <article class="card">
-          <header class="card-head"><h2>带引用问答</h2><label class="check"><input type="checkbox" id="answer-llm" checked> 使用离线 Demo LLM</label></header>
+          <header class="card-head"><h2>带引用问答</h2><span id="answer-mode-hint" class="muted">自动</span></header>
           <form id="answer-form" class="form-row">
             <label class="field grow">
               <span>问题</span>
               <input type="text" id="answer-question" placeholder="例如：香山秋天什么时候去最好？" required>
+            </label>
+            <label class="field narrow">
+              <span>回答模式</span>
+              <select id="answer-llm">
+                <option value="auto">自动（有 Key 用在线）</option>
+                <option value="offline">离线 Demo</option>
+                <option value="online">在线 LLM</option>
+                <option value="none">仅检索引用</option>
+              </select>
             </label>
             <label class="field narrow">
               <span>Top K</span>

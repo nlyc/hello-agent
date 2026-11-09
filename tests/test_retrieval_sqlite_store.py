@@ -166,3 +166,29 @@ def test_search_empty_store_and_zero_top_k(tmp_path):
         assert store.search(HashingEmbedder().embed_query("故宫"), top_k=0) == []
     finally:
         store.close()
+
+
+def test_list_chunks_returns_text_without_vectors(tmp_path):
+    store = SQLiteVectorStore(tmp_path / "rag.sqlite3")
+    try:
+        store.upsert(
+            [
+                make_chunk("c1", "故宫开放时间", namespace="travel", doc_id="doc-1"),
+                make_chunk("c2", "北京烤鸭", namespace="travel", doc_id="doc-2"),
+                make_chunk("c3", "报销流程", namespace="policy", doc_id="doc-3"),
+            ]
+        )
+        all_chunks = store.list_chunks()
+        assert {chunk.chunk_id for chunk in all_chunks} == {"c1", "c2", "c3"}
+        assert all(chunk.embedding is None for chunk in all_chunks)
+        assert {chunk.text for chunk in all_chunks} == {
+            "故宫开放时间",
+            "北京烤鸭",
+            "报销流程",
+        }
+
+        travel = store.list_chunks("travel")
+        assert {chunk.chunk_id for chunk in travel} == {"c1", "c2"}
+        assert store.list_chunks("missing") == []
+    finally:
+        store.close()
