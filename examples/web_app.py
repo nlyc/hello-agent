@@ -50,9 +50,11 @@ from examples.demo_travel_memory_rag import (
     KNOWLEDGE_DOCS,
     MAIN_QUESTION,
     SEED_MEMORY_TEXTS,
+    RealtimeContextLLM,
     TravelDemoLLM,
     demo_paradigms,
     demo_workflow,
+    realtime_context,
     run_demo,
     seed_memory,
 )
@@ -1184,6 +1186,7 @@ class WebState:
             raise ApiError("问题过长（最多 200 字）")
         llm: Any = None
         llm_model: str | None = None
+        real_tools = False
         if online:
             config = Config.from_env()
             self.config = config
@@ -1200,10 +1203,22 @@ class WebState:
                 timeout=config.llm.timeout,
             )
             llm_model = config.llm.model
+            # 在线模式下用联网搜索提供真实天气 / 景点；没有搜索 Key 时退回
+            # 带“演示数据”标注的固定工具输出，避免出现假的实时气温。
+            real_tools = bool(
+                config.search.tavily_api_key or config.search.serpapi_api_key
+            )
         elif question != MAIN_QUESTION:
             raise ApiError(
                 "离线三范式只支持内置问题；自定义问题请勾选“使用在线 LLM”"
             )
+
+        realtime = ""
+        if llm is not None:
+            # Reflection / Plan-and-Solve 没有工具，注入一次实时检索资料，
+            # 避免在线模型编造“今日气温”。
+            realtime = realtime_context(question) if real_tools else ""
+            llm = RealtimeContextLLM(llm, realtime)
 
         with self.job_lock:
             embedder = HashingEmbedder()
@@ -1218,9 +1233,13 @@ class WebState:
                         tracer,
                         question=question,
                         llm_factory=(lambda: llm) if llm is not None else TravelDemoLLM,
+                        real_tools=real_tools,
                     )
                     workflow_answer = demo_workflow(
-                        tracer, question=question, llm=llm
+                        tracer,
+                        question=question,
+                        llm=llm,
+                        real_tools=real_tools,
                     )
                 except Exception as exc:
                     if not online:
@@ -1232,6 +1251,8 @@ class WebState:
                     "workflow_answer": workflow_answer,
                     "llm_backend": "online" if online else "offline",
                     "llm_model": llm_model,
+                    "real_tools": real_tools,
+                    "realtime_context": realtime[:400] or None,
                 }
             finally:
                 store.close()
@@ -1243,11 +1264,14 @@ class WebState:
         query: str | None = None,
         embed_backend: str = "hashing",
         use_console_kb: bool = False,
+        online: bool = False,
     ) -> dict[str, Any]:
         """在独立目录运行完整 Demo，返回报告与产物列表。
 
         ``use_console_kb`` 为真时，把控制台上传/URL 入库的文档并入本次 Demo
         的临时索引（内置四篇示例已在 Demo 语料中，不重复加入）。
+        ``online`` 为真且配置了 LLM Key 时，自定义问题改用在线 LLM 回答，
+        知识库未命中还会自动联网检索。
         """
         if embed_backend not in {"hashing", "fastembed"}:
             raise ApiError("embed_backend 必须是 hashing 或 fastembed")
@@ -1257,6 +1281,27 @@ class WebState:
         if use_console_kb:
             with self.lock:
                 sources = self._console_upload_sources()
+        answer_llm: Any = None
+        llm_label = "离线 TravelDemoLLM"
+        search_fallback = False
+        if online:
+            config = Config.from_env()
+            self.config = config
+            if config.llm.api_key:
+                answer_llm = OpenAICompatibleLLM(
+                    base_url=config.llm.base_url or None,
+                    api_key=config.llm.api_key,
+                    model=config.llm.model or None,
+                    temperature=config.llm.temperature,
+                    timeout=config.llm.timeout,
+                )
+                llm_label = f"在线 LLM · {config.llm.model}"
+                search_fallback = bool(
+                    config.search.fallback
+                    and (config.search.tavily_api_key or config.search.serpapi_api_key)
+                )
+            else:
+                llm_label = "在线 LLM 未配置 Key，已回退离线 TravelDemoLLM"
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         run_id = f"run-{stamp}-{int(time.time() * 1000) % 1000:03d}"
         out_dir = self.runs_dir / run_id
@@ -1270,6 +1315,9 @@ class WebState:
                     embed_backend=embed_backend,
                     ingest=ingest_sources or None,
                     query=query,
+                    answer_llm=answer_llm,
+                    llm_label=llm_label,
+                    search_fallback=search_fallback,
                 )
             except Exception as exc:
                 raise ApiError(f"Demo 运行失败：{exc}") from exc
@@ -1285,6 +1333,9 @@ class WebState:
             "cross_session": result["cross_session"],
             "workflow_answer": result["workflow_answer"],
             "extra_ingest": result.get("extra_ingest") or [],
+            "extra_answer": result.get("extra_answer"),
+            "llm_label": llm_label,
+            "search_fallback": search_fallback,
             "console_kb_docs": len(sources),
             "artifacts": self._run_files(out_dir),
         }
@@ -1716,6 +1767,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     query=payload.get("query"),
                     embed_backend=str(payload.get("embed_backend") or "hashing"),
                     use_console_kb=bool(payload.get("use_console_kb", False)),
+                    online=bool(payload.get("online", False)),
                 )
             )
             return

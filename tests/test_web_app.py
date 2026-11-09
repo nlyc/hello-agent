@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from examples import web_app
+import examples.demo_travel_memory_rag as demo_module
 from examples.demo_travel_memory_rag import KNOWLEDGE_DOCS
 from examples.web_app import WebState, make_server
 from agentflow.retrieval import HashingEmbedder
@@ -625,6 +626,7 @@ def test_paradigms_run_produces_comparison(console):
         assert row["without_memory"] != row["with_memory"]
     assert payload["workflow_answer"].strip()
     assert payload["llm_backend"] == "offline"
+    assert payload["real_tools"] is False
 
 
 def test_paradigms_reject_custom_question_offline(console):
@@ -703,6 +705,46 @@ def test_paradigms_online_supports_custom_question(console, monkeypatch):
     assert "南昌" in payload["workflow_answer"]
 
 
+def test_paradigms_online_uses_realtime_tools_when_search_configured(
+    console, monkeypatch
+):
+    base, _ = console
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("TAVILY_API_KEY", "test-search-key")
+    monkeypatch.setattr(web_app, "OpenAICompatibleLLM", _FakeOnlineLLM)
+    monkeypatch.setattr(
+        demo_module, "_real_weather", lambda city: f"{city}实时天气：小雨 18℃"
+    )
+    monkeypatch.setattr(
+        demo_module,
+        "_real_attraction",
+        lambda city, weather: f"{city}实时景点：滕王阁、江西省博物馆",
+    )
+    monkeypatch.setattr(
+        web_app, "realtime_context", lambda question, **kwargs: "南昌实时天气：小雨 18℃"
+    )
+    seen = {}
+
+    original = demo_module.demo_paradigms
+
+    def capture(*args, **kwargs):
+        seen["real_tools"] = kwargs.get("real_tools")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(web_app, "demo_paradigms", capture)
+
+    payload = _json(
+        base,
+        "/api/paradigms/run",
+        method="POST",
+        payload={"question": "南昌今天天气怎么样？", "online": True},
+    )
+
+    assert payload["real_tools"] is True
+    assert seen["real_tools"] is True
+    assert payload["llm_backend"] == "online"
+
+
 def test_seed_toggle_removes_builtins_and_persists(console):
     base, state = console
     initial = _json(base, "/api/documents")
@@ -768,6 +810,39 @@ def test_demo_can_use_console_uploads(console):
     assert payload["extra_ingest"][0]["source_uri"].endswith("nanchang.md")
     assert "## 额外入库" in payload["report"]
     assert "南昌旅行知识" in payload["report"]
+
+
+class _FakeDemoAnswerLLM:
+    """Demo 额外问答的在线 LLM 替身。"""
+
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+
+    def chat(self, messages, **kwargs):
+        return "在线总结：北京雨天优先选择故宫博物院等室内景点。"
+
+
+def test_demo_online_answers_with_llm_label(console, monkeypatch):
+    base, _ = console
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_MODEL", "fake-model")
+    monkeypatch.setattr(web_app, "OpenAICompatibleLLM", _FakeDemoAnswerLLM)
+
+    payload = _json(
+        base,
+        "/api/demo/run",
+        method="POST",
+        payload={
+            "embed_backend": "hashing",
+            "query": "北京下雨天适合去哪？",
+            "online": True,
+        },
+    )
+
+    assert payload["llm_label"] == "在线 LLM · fake-model"
+    assert payload["extra_answer"]["answer_source"] == "kb"
+    assert "在线 LLM · fake-model" in payload["report"]
+    assert "在线总结：北京雨天优先选择故宫博物院等室内景点。" in payload["report"]
 
 
 # --------------------------------------------------------------------- 评估与测试

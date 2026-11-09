@@ -12,6 +12,25 @@ from examples.demo_travel_memory_rag import (
     main,
     run_demo,
 )
+import examples.demo_travel_memory_rag as demo_module
+
+
+class _FakeAnswerLLM:
+    """只用于额外问答的在线 LLM 替身。"""
+
+    def chat(self, messages, **kwargs):
+        return "在线总结：北京雨天优先选择故宫博物院等室内景点。"
+
+
+class _FakeSearchTool:
+    """联网搜索替身，返回固定摘要。"""
+
+    def run_with_backend(self, parameters):
+        return (
+            "[1] 南昌天气 — https://example.com/weather\n"
+            "    南昌今天小雨，18℃，适合室内景点。",
+            "fake-search",
+        )
 
 
 def _run(tmp_path: Path) -> dict:
@@ -99,6 +118,40 @@ def test_demo_cli_accepts_query_and_ingest(tmp_path):
     assert result["stats"]["chunks"] >= len(KNOWLEDGE_DOCS) + 1
     assert "## 自定义问题" in report
     assert "景山公园早上六点开门" in report
+
+
+def test_demo_custom_question_uses_online_llm_and_is_prominent(tmp_path):
+    result = run_demo(
+        tmp_path / "run",
+        query="北京下雨天适合去哪？",
+        answer_llm=_FakeAnswerLLM(),
+        llm_label="在线 LLM · fake-model",
+    )
+    report = (tmp_path / "run" / "rag_eval.md").read_text(encoding="utf-8")
+
+    assert "- 回答模型：在线 LLM · fake-model" in report
+    assert "在线总结：北京雨天优先选择故宫博物院等室内景点。" in report
+    assert result["extra_answer"]["answer_source"] == "kb"
+    assert result["extra_answer"]["llm"] == "在线 LLM · fake-model"
+    # 自定义问题在固定演示章节之前，避免用户误以为整份报告都在回答自己的问题。
+    assert report.index("## 自定义问题") < report.index("## 固定演示章节")
+    assert "使用内置北京脚本" in report
+
+
+def test_demo_search_fallback_when_knowledge_misses(tmp_path, monkeypatch):
+    monkeypatch.setattr(demo_module, "SearchTool", lambda: _FakeSearchTool())
+
+    result = run_demo(
+        tmp_path / "run",
+        query="南昌下雨适合去哪？",
+        search_fallback=True,
+    )
+    report = (tmp_path / "run" / "rag_eval.md").read_text(encoding="utf-8")
+
+    assert result["extra_answer"]["answer_source"] == "web_search"
+    assert result["extra_answer"]["web_search"]["backend"] == "fake-search"
+    assert "### 联网搜索补充" in report
+    assert "南昌今天小雨，18℃" in report
 
 
 def test_demo_cli_prints_report(tmp_path, capsys):

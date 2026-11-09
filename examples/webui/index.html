@@ -299,7 +299,7 @@ py -3.14 -m pytest -q</pre>
           <button class="primary-btn" type="submit" id="run-paradigms">运行对照</button>
         </div>
       </form>
-      <p class="hint">默认使用脚本化离线 LLM 与固定问题，保证结果可复现；勾选在线 LLM 后才能输入自定义问题。每次运行使用独立的临时记忆并写入演示画像，不会污染“记忆”页签中的数据。</p>
+      <p class="hint">默认使用脚本化离线 LLM 与固定问题，保证结果可复现；勾选在线 LLM 后才能输入自定义问题。在线模式配置了 Tavily / SerpAPI 时，ReAct 的天气与景点工具会实时联网检索；否则工具输出会标注“演示数据，未联网”，不会把固定气温当成实时结果。每次运行使用独立的临时记忆并写入演示画像，不会污染“记忆”页签中的数据。</p>
       <div id="paradigm-question" class="callout hidden"></div>
       <div id="paradigm-results" class="results"></div>
       <div id="workflow-result" class="results"></div>
@@ -328,13 +328,14 @@ py -3.14 -m pytest -q</pre>
           <div class="form-row">
             <label class="field grow">
               <span>额外提问（可选）</span>
-              <input type="text" id="demo-query" placeholder="北京下雨天适合去哪？">
+              <input type="text" id="demo-query" placeholder="南昌下雨适合去哪玩？">
             </label>
             <label class="check"><input type="checkbox" id="demo-use-kb"> 并入当前知识库（仅你上传的文档）</label>
+            <label class="check"><input type="checkbox" id="demo-online" checked> 额外提问用在线 LLM</label>
             <button class="primary-btn" type="submit">运行 Demo</button>
           </div>
         </form>
-        <p class="hint">主报告是固定的北京脚本；勾选“并入当前知识库”后，你上传的文档会加入本次 Demo 的临时索引，可用于“额外提问”。内置四篇示例已在 Demo 语料中，不会重复加入。</p>
+        <p class="hint">主报告的三范式、多轮调整等章节是固定的北京脚本；<strong>只有最上方的“自定义问题”一节针对你输入的额外提问</strong>。勾选“并入当前知识库”后，你上传的文档会加入本次 Demo 的临时索引；勾选“额外提问用在线 LLM”后由模型基于检索资料作答，知识库未命中时自动联网搜索补充。未配置 Key 时自动回退离线模式，报告会标注实际使用的模型。</p>
         <p class="hint">输出写入 <span class="mono">.data/webui/runs/&lt;run-id&gt;/</span>，包含 rag_eval.md、memory.json、trace.jsonl。</p>
         <div id="demo-artifacts" class="results"></div>
       </article>

@@ -866,10 +866,13 @@
         const label = data.llm_backend === 'online'
           ? `在线 LLM${data.llm_model ? ` · ${data.llm_model}` : ''}`
           : '离线脚本 LLM';
-        $('#paradigm-mode').textContent = label;
+        const toolLabel = data.llm_backend === 'online'
+          ? (data.real_tools ? ' · 工具：实时联网' : ' · 工具：演示数据')
+          : '';
+        $('#paradigm-mode').textContent = `${label}${toolLabel}`;
         const questionBox = $('#paradigm-question');
         questionBox.classList.remove('hidden');
-        questionBox.textContent = `提问：${data.question || ''}（${label}）`;
+        questionBox.textContent = `提问：${data.question || ''}（${label}${toolLabel}）`;
 
         $('#paradigm-results').innerHTML = (data.rows || [])
           .map(
@@ -940,13 +943,23 @@
           ingest: $('#demo-ingest').value.trim() || null,
           query: $('#demo-query').value.trim() || null,
           use_console_kb: $('#demo-use-kb').checked,
+          online: $('#demo-online').checked,
         },
       });
       const kbCount = data.console_kb_docs ?? 0;
+      const extra = data.extra_answer;
+      const sourceLabel = !extra
+        ? ''
+        : extra.answer_source === 'web_search'
+          ? ' · 额外提问：联网搜索'
+          : extra.answer_source === 'kb'
+            ? ' · 额外提问：知识库'
+            : ' · 额外提问：未命中';
       $('#demo-artifacts').innerHTML = `
         <article class="hit">
           <div class="hit-head"><span class="chip">${esc(data.run_id)}</span>
-            <span class="muted">chunks ${esc((data.stats || {}).chunks ?? '—')} · 控制台文档 ${kbCount} 篇</span></div>
+            <span class="muted">chunks ${esc((data.stats || {}).chunks ?? '—')} · 控制台文档 ${kbCount} 篇${esc(sourceLabel)}</span></div>
+          <div class="muted">${esc(data.llm_label || '')}</div>
           <div class="run-files">${artifactsHtml(data.artifacts)}</div>
         </article>`;
       $('#demo-run-label').textContent = data.run_id;
