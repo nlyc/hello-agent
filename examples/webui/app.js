@@ -334,7 +334,7 @@
       search.serpapi_configured ? 'SerpAPI 已配置' : '',
     ].filter(Boolean);
     $('#settings-search').textContent = searchFlags.length
-      ? `${searchFlags.join(' · ')} · 最多 ${search.max_results ?? '—'} 条`
+      ? `${searchFlags.join(' · ')} · 最多 ${search.max_results ?? '—'} 条 · 知识库未命中${search.fallback ? '自动联网' : '不联网'}`
       : '未配置（在 .env 填写 TAVILY_API_KEY 或 SERPAPI_API_KEY）';
 
     const sqlite = settings.sqlite || {};
@@ -606,22 +606,51 @@
       const error = data.llm_error
         ? `<p class="callout">${esc(data.llm_error)}</p>`
         : '';
+      const web = data.web_search;
+      const webHits = web && (web.results || []).length
+        ? `<div class="hit-meta">联网检索 · ${esc(web.backend || '—')} · ${esc(web.query || '')}</div>` +
+          (web.results || [])
+            .map(
+              (item, index) => `
+      <article class="hit">
+        <div class="hit-head">
+          <span class="rank">#${index + 1}</span>
+          <span class="hit-cite">${esc(item.url || '')}</span>
+        </div>
+        <div class="hit-text">${esc(item.title || item.url || '')}</div>
+        ${item.snippet ? `<div class="hit-meta">${esc(item.snippet)}</div>` : ''}
+      </article>`
+            )
+            .join('')
+        : '';
+      const sourceLabel = data.answer_source === 'web_search' ? '联网搜索' : '本地知识库';
+      const webError = data.web_search_error
+        ? `<p class="callout">${esc(data.web_search_error)}</p>`
+        : '';
       $('#answer-mode-hint').textContent = backendLabel;
       $('#answer-result').innerHTML = `
         <div class="answer-box">
           <p>${esc(data.answer || '（空回答）')}</p>
           <div class="citations">${citations || '<span>无引用</span>'}</div>
-          <div class="hit-meta">回答后端：${esc(backendLabel)}</div>
+          <div class="hit-meta">回答后端：${esc(backendLabel)} · 答案来源：${esc(sourceLabel)}</div>
         </div>
         ${error}
+        ${webError}
+        ${webHits}
         ${hits}`;
       toast(
-        data.llm_error
-          ? '在线模型不可用，已回落离线回答'
-          : data.has_answer
-            ? '已生成带引用的回答'
-            : '知识库中未找到相关内容',
-        data.llm_error ? 'err' : 'ok'
+        data.web_search_error
+          ? data.has_answer
+            ? '联网检索失败，已返回本地结果'
+            : '联网检索失败'
+          : data.answer_source === 'web_search'
+            ? `知识库未命中，已联网检索（${data.web_search?.backend || '—'}）`
+            : data.llm_error
+              ? '在线模型不可用，已回落离线回答'
+              : data.has_answer
+                ? '已生成带引用的回答'
+                : '知识库中未找到相关内容',
+        data.web_search_error || data.llm_error ? 'err' : 'ok'
       );
     }).catch(reason);
   }

@@ -85,6 +85,14 @@ class SearchTool(Tool):
         return backends
 
     def run(self, parameters: dict[str, Any]) -> str:
+        """执行搜索并返回格式化文本（Tool 接口）。"""
+        text, _ = self.run_with_backend(parameters)
+        return text
+
+    def run_with_backend(
+        self, parameters: dict[str, Any]
+    ) -> tuple[str, str]:
+        """执行搜索，返回 ``(格式化文本, 实际使用的后端名)``。"""
         query = str(parameters.get("input", "") or parameters.get("query", "")).strip()
         if not query:
             raise ToolError("搜索查询不能为空")
@@ -93,7 +101,7 @@ class SearchTool(Tool):
         errors = []
         for name, backend in self._backends:
             try:
-                return backend(query)
+                return backend(query), name
             except Exception as e:
                 errors.append(f"{name}: {e}")
         raise ToolError("所有搜索后端均失败：" + "；".join(errors))

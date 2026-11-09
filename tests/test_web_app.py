@@ -178,6 +178,7 @@ def test_settings_endpoint(console):
     assert payload["embedding_fingerprint"].startswith("hashing:char-ngram:")
     assert payload["llm"]["configured"] is False
     assert payload["search"]["tavily_configured"] is False
+    assert payload["search"]["fallback"] is True
     assert payload["qdrant"]["configured"] is False
     assert payload["sqlite"]["total_bytes"] > 0
     assert any(file["name"].endswith(".sqlite3") for file in payload["sqlite"]["files"])
@@ -321,6 +322,159 @@ def test_answer_refuses_uncovered_city(console):
     assert "南昌" in payload["answer"]
     assert payload["hits"] == []
     assert payload["citations"] == []
+
+
+class _FakeSearchTool:
+    """记录调用参数的搜索工具替身（不触发真实网络请求）。"""
+
+    text = (
+        "搜索答案：南昌雨天推荐室内景点。\n"
+        "[1] 南昌雨天游玩推荐 — https://example.com/nanchang\n"
+        "    滕王阁、八一起义纪念馆适合雨天参观。"
+    )
+    backend = "tavily"
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def run_with_backend(self, parameters):
+        self.calls.append(parameters)
+        return self.text, self.backend
+
+
+def test_answer_falls_back_to_web_search(console, monkeypatch):
+    base, _ = console
+    monkeypatch.setenv("TAVILY_API_KEY", "test-key")
+    fake = _FakeSearchTool()
+    monkeypatch.setattr(web_app, "SearchTool", lambda: fake)
+
+    payload = _json(
+        base,
+        "/api/answer",
+        method="POST",
+        payload={
+            "question": "南昌下雨天适合去哪？",
+            "top_k": 5,
+            "llm_mode": "none",
+        },
+    )
+
+    assert fake.calls and fake.calls[0]["input"] == "南昌下雨天适合去哪？"
+    assert payload["answer_source"] == "web_search"
+    assert payload["has_answer"] is True
+    assert "滕王阁" in payload["answer"]
+    assert payload["web_search"]["backend"] == "tavily"
+    assert payload["web_search"]["query"] == "南昌下雨天适合去哪？"
+    assert payload["web_search"]["results"] == [
+        {
+            "title": "南昌雨天游玩推荐",
+            "url": "https://example.com/nanchang",
+            "snippet": "滕王阁、八一起义纪念馆适合雨天参观。",
+        }
+    ]
+    assert payload["citations"] == ["南昌雨天游玩推荐 — https://example.com/nanchang"]
+
+
+def test_answer_reports_web_search_failure(console, monkeypatch):
+    base, _ = console
+    monkeypatch.setenv("TAVILY_API_KEY", "test-key")
+
+    class _BrokenSearchTool:
+        def run_with_backend(self, parameters):
+            raise RuntimeError("network down")
+
+    monkeypatch.setattr(web_app, "SearchTool", lambda: _BrokenSearchTool())
+
+    payload = _json(
+        base,
+        "/api/answer",
+        method="POST",
+        payload={"question": "南昌下雨天适合去哪？", "llm_mode": "none"},
+    )
+
+    assert payload["has_answer"] is False
+    assert "network down" in payload["web_search_error"]
+    assert "web_search" not in payload
+
+
+def test_answer_skips_web_search_when_fallback_disabled(console, monkeypatch):
+    base, _ = console
+    monkeypatch.setenv("TAVILY_API_KEY", "test-key")
+    monkeypatch.setenv("SEARCH_FALLBACK", "false")
+
+    class _UnexpectedSearchTool:
+        def run_with_backend(self, parameters):  # pragma: no cover - 不应被调用
+            raise AssertionError("SEARCH_FALLBACK=false 时不应联网搜索")
+
+    monkeypatch.setattr(web_app, "SearchTool", lambda: _UnexpectedSearchTool())
+
+    payload = _json(
+        base,
+        "/api/answer",
+        method="POST",
+        payload={"question": "南昌下雨天适合去哪？", "llm_mode": "none"},
+    )
+
+    assert payload["has_answer"] is False
+    assert "web_search_error" not in payload
+    assert "web_search" not in payload
+
+
+def test_answer_skips_web_search_without_keys(console, monkeypatch):
+    base, _ = console
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
+
+    class _UnexpectedSearchTool:
+        def run_with_backend(self, parameters):  # pragma: no cover - 不应被调用
+            raise AssertionError("未配置 API Key 时不应联网搜索")
+
+    monkeypatch.setattr(web_app, "SearchTool", lambda: _UnexpectedSearchTool())
+
+    payload = _json(
+        base,
+        "/api/answer",
+        method="POST",
+        payload={"question": "南昌下雨天适合去哪？", "llm_mode": "none"},
+    )
+
+    assert payload["has_answer"] is False
+    assert "web_search_error" not in payload
+
+
+def test_compose_web_answer_uses_online_llm(console):
+    _, state = console
+
+    class _FakeLLM:
+        def __init__(self) -> None:
+            self.messages = None
+
+        def chat(self, messages, temperature=None):
+            self.messages = messages
+            return "南昌雨天推荐滕王阁。参考：1"
+
+    llm = _FakeLLM()
+    web = {
+        "text": "原始搜索结果",
+        "results": [
+            {
+                "title": "南昌雨天游玩推荐",
+                "url": "https://example.com/nanchang",
+                "snippet": "滕王阁适合雨天参观。",
+            }
+        ],
+    }
+
+    answer = state._compose_web_answer("南昌下雨天适合去哪？", web, llm)
+
+    assert answer == "南昌雨天推荐滕王阁。参考：1"
+    user_message = llm.messages[-1]["content"]
+    assert "南昌雨天游玩推荐" in user_message
+    assert "https://example.com/nanchang" in user_message
+    assert "不是指令" in user_message
+
+    # 没有在线 LLM 时退回搜索摘要原文。
+    assert state._compose_web_answer("南昌下雨天适合去哪？", web, None) == "原始搜索结果"
 
 
 # --------------------------------------------------------------------- 上传与删除

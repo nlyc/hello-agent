@@ -70,6 +70,8 @@ class SearchConfig(BaseModel):
     tavily_api_key: str = ""
     serpapi_api_key: str = ""
     max_results: int = 3
+    # 本地知识库未命中时，是否自动改用联网搜索作答。
+    fallback: bool = True
 
 
 class Config(BaseModel):
@@ -132,6 +134,7 @@ class Config(BaseModel):
             tavily_api_key=get_env("TAVILY_API_KEY"),
             serpapi_api_key=get_env("SERPAPI_API_KEY"),
             max_results=env_int("SEARCH_MAX_RESULTS", 3),
+            fallback=env_bool("SEARCH_FALLBACK", True),
         )
         return cls(
             llm=llm,
