@@ -143,6 +143,30 @@ def _parse_web_results(text: str) -> list[dict[str, str]]:
     return results
 
 
+class _ReadOnlyMemory:
+    """只读记忆代理：三范式读取控制台的真实长期记忆，但不写回。
+
+    Agent 每轮结束会调用 ``record_turn``；这里做成空操作，避免三范式
+    对照把演示问答写进“记忆”页签的长期记忆。
+    """
+
+    def __init__(self, memory: MemoryManager) -> None:
+        self._memory = memory
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self._memory.enabled)
+
+    def build_context(self, query: str = "", max_tokens: int = 1500):
+        return self._memory.build_context(query, max_tokens=max_tokens)
+
+    def search(self, query: str, top_k: int | None = None):
+        return self._memory.search(query, top_k=top_k)
+
+    def record_turn(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
 class WebState:
     """Web 控制台的全部可变状态。
 
@@ -1210,10 +1234,16 @@ class WebState:
 
         with self.job_lock:
             embedder = HashingEmbedder()
-            store = LongTermMemory(embedder, path=":memory:", user_id="demo_run")
-            try:
+            store: LongTermMemory | None = None
+            if online:
+                # 在线对照读取“记忆”页签里的真实长期记忆；只读代理保证
+                # 三范式问答不会写回、污染用户的记忆列表。
+                memory: Any = _ReadOnlyMemory(self.memory)
+            else:
+                store = LongTermMemory(embedder, path=":memory:", user_id="demo_run")
                 memory = MemoryManager(embedder, store, user_id="demo_run")
                 seed_memory(memory)
+            try:
                 tracer = Tracer()
                 try:
                     rows = demo_paradigms(
@@ -1243,7 +1273,8 @@ class WebState:
                     "realtime_context": realtime[:400] or None,
                 }
             finally:
-                store.close()
+                if store is not None:
+                    store.close()
 
     def run_demo_job(
         self,

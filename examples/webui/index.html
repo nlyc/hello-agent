@@ -297,7 +297,7 @@ py -3.14 -m pytest -q</pre>
           <button class="primary-btn" type="submit" id="run-paradigms">运行对照</button>
         </div>
       </form>
-      <p class="hint">三种范式全部使用在线 LLM 与实时检索：ReAct 的天气 / 景点工具直接联网查询，Reflection / Plan-and-Solve 会注入同一份实时检索资料，避免编造日期和气温。需要配置 <span class="mono">LLM_API_KEY</span> 与 <span class="mono">TAVILY_API_KEY</span>（或 SerpAPI）。每次运行使用独立的临时记忆并写入演示画像，不会污染“记忆”页签中的数据。</p>
+      <p class="hint">三种范式全部使用在线 LLM 与实时检索：ReAct 的天气工具通过观测接口查询实时气温（失败时降级为搜索摘要并标注），景点工具直接联网查询；Reflection / Plan-and-Solve 会注入同一份实时检索资料，避免编造日期和气温。“有记忆”读取“记忆”页签中的真实长期记忆（只读，不会把本次问答写回）。需要配置 <span class="mono">LLM_API_KEY</span> 与 <span class="mono">TAVILY_API_KEY</span>（或 SerpAPI）。</p>
       <div id="paradigm-question" class="callout hidden"></div>
       <div id="paradigm-results" class="results"></div>
       <div id="workflow-result" class="results"></div>

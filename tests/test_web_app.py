@@ -701,6 +701,38 @@ def test_paradigms_online_supports_custom_question(console, monkeypatch):
     assert "南昌" in payload["workflow_answer"]
 
 
+def test_paradigms_online_uses_real_long_term_memory(console, monkeypatch):
+    """在线三范式的“有记忆”必须来自记忆页签，且不能写回。"""
+    base, state = console
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_MODEL", "fake-model")
+    monkeypatch.setattr(web_app, "OpenAICompatibleLLM", _FakeOnlineLLM)
+    state.memory_clear()
+    state.memory.add("用户计划去南昌看滕王阁", memory_type="episodic")
+    before = state.long_term.count()
+
+    captured = {}
+    original = demo_module.demo_paradigms
+
+    def spy(memory, tracer, **kwargs):
+        captured["memory"] = memory
+        captured["context"] = memory.build_context("南昌滕王阁", max_tokens=600)
+        return original(memory, tracer, **kwargs)
+
+    monkeypatch.setattr(web_app, "demo_paradigms", spy)
+    _json(
+        base,
+        "/api/paradigms/run",
+        method="POST",
+        payload={"question": "南昌一日游，推荐好玩的景点"},
+    )
+
+    assert "滕王阁" in captured["context"].text
+    assert "香山" not in captured["context"].text
+    captured["memory"].record_turn("测试问题", "测试回答")
+    assert state.long_term.count() == before
+
+
 def test_paradigms_online_uses_realtime_tools_when_search_configured(
     console, monkeypatch
 ):

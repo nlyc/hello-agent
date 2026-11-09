@@ -40,6 +40,59 @@ class _FakeSearchTool:
         )
 
 
+class _FakeHTTPResponse:
+    """urllib 响应替身。"""
+
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    def read(self) -> bytes:
+        return json.dumps(self._payload, ensure_ascii=False).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def test_fetch_current_weather_reads_observation(monkeypatch):
+    payload = {
+        "current_condition": [
+            {
+                "temp_C": "13",
+                "FeelsLikeC": "11",
+                "humidity": "70",
+                "observation_time": "08:00 AM",
+                "weatherDesc": [{"value": "多云"}],
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        demo_module.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: _FakeHTTPResponse(payload),
+    )
+
+    text = demo_module._fetch_current_weather("南昌")
+    assert "南昌" in text
+    assert "13℃" in text
+    assert "观测时间 08:00 AM" in text
+    assert "wttr.in" in text
+
+
+def test_real_weather_falls_back_to_search(monkeypatch):
+    def boom(city):
+        raise RuntimeError("weather api down")
+
+    monkeypatch.setattr(demo_module, "_fetch_current_weather", boom)
+    monkeypatch.setattr(demo_module, "SearchTool", lambda: _FakeSearchTool())
+
+    text = demo_module._real_weather("南昌")
+    assert "南昌今天小雨，18℃" in text
+    assert "搜索摘要" in text
+
+
 def _run(tmp_path: Path) -> dict:
     """在临时目录跑一次 Demo（离线 Hashing 后端）。"""
     return run_demo(tmp_path)

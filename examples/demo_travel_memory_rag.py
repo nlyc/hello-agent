@@ -39,6 +39,8 @@ import os
 import re
 import sys
 import threading
+import urllib.parse
+import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
@@ -349,9 +351,50 @@ def _search_excerpt(query: str, *, limit: int = 900) -> str:
     return f"[联网搜索·{backend}] {compact[:limit] or '未返回结果'}"
 
 
+_WEATHER_URL = "https://wttr.in/{city}?format=j1&lang=zh"
+_WEATHER_TIMEOUT = 15
+
+
+def _fetch_current_weather(city: str) -> str:
+    """通过 wttr.in 获取实时观测气温（无需 API Key）。
+
+    Tavily 的 ``answer`` 是对网页的二次总结，天气场景下可能已过期；
+    这里直接取观测接口的 ``temp_C``，并带上观测时间与来源。
+    """
+    name = re.sub(r"\s+", "", str(city or ""))[:20]
+    if not name:
+        raise ValueError("城市名为空")
+    url = _WEATHER_URL.format(city=urllib.parse.quote(name, safe=""))
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "agentflow-demo/1.0"}
+    )
+    with urllib.request.urlopen(request, timeout=_WEATHER_TIMEOUT) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    current = (payload.get("current_condition") or [{}])[0]
+    temperature = current.get("temp_C")
+    if temperature is None:
+        raise ValueError("天气接口未返回气温")
+    desc = current.get("weatherDesc") or [{}]
+    description = str(desc[0].get("value") or "天气未知").strip()
+    feels = current.get("FeelsLikeC", "—")
+    humidity = current.get("humidity", "—")
+    observed = current.get("observation_time", "—")
+    return (
+        f"{name}实时天气：{description}，气温 {temperature}℃"
+        f"（体感 {feels}℃，湿度 {humidity}%，观测时间 {observed}，来源 wttr.in）"
+    )
+
+
 def _real_weather(city: str) -> str:
     """在线模式：查询城市实时天气，而不是返回固定温度。"""
-    return _search_excerpt(f"{city}今天天气 实时气温")
+    try:
+        return _fetch_current_weather(city)
+    except Exception as exc:
+        text = _search_excerpt(f"{city}今天天气 实时气温")
+        return (
+            f"{text}\n"
+            f"（实时天气接口不可用：{exc}；以上为搜索摘要，可能不是最新观测）"
+        )
 
 
 def _real_attraction(city: str, weather: str) -> str:
