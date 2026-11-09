@@ -917,26 +917,21 @@ class WebState:
     def _select_llm(
         self, mode: str
     ) -> tuple[Any | None, str, str | None, str | None]:
-        """按模式选择回答后端：online / offline / retrieval。
+        """按模式选择回答后端：online / retrieval。
 
-        返回 ``(llm, backend, model, notice)``。``auto`` 在配置了
-        ``LLM_API_KEY`` 时使用在线模型，否则回落到离线 Demo LLM。
+        返回 ``(llm, backend, model, notice)``。``auto`` 与 ``online`` 都要求
+        ``LLM_API_KEY``；离线演示模式已移除。
         """
         if mode == "none":
             return None, "retrieval", None, None
+        if mode == "offline":
+            raise ApiError("离线回答模式已移除，请在 .env 配置 LLM_API_KEY 后使用在线回答")
         # 每次回答重新读取 .env，修改 Key / 模型后无需重启服务。
         config = Config.from_env()
         self.config = config
         if not config.llm.api_key:
-            if mode == "online":
-                raise ApiError(
-                    "未配置 LLM_API_KEY，无法使用在线回答；请在项目根目录 .env 中填写"
-                )
-            return (
-                TravelDemoLLM(),
-                "offline",
-                None,
-                "未配置 LLM_API_KEY，已使用离线 Demo LLM",
+            raise ApiError(
+                "未配置 LLM_API_KEY，无法使用在线回答；请在项目根目录 .env 中填写"
             )
         llm = OpenAICompatibleLLM(
             base_url=config.llm.base_url or None,
@@ -956,8 +951,8 @@ class WebState:
     ) -> dict[str, Any]:
         """基于检索结果生成带引用的回答。
 
-        ``llm_mode`` 优先：``auto``（有 Key 用在线，否则离线）、``online``、
-        ``offline``、``none``（仅抽取式）。未提供时保持旧行为（离线性）。
+        ``llm_mode`` 优先：``auto`` / ``online`` 使用在线 LLM，``none`` 仅
+        抽取式（不调用模型）。离线回答模式已移除。
         """
         question = str(question or "").strip()
         if not question:
@@ -965,21 +960,14 @@ class WebState:
         limit = _clamp_int(top_k, 5, 1, 20)
         mode = str(llm_mode or "").strip().lower()
         if mode not in {"auto", "online", "offline", "none"}:
-            mode = "offline" if use_llm else "none"
+            mode = "auto" if use_llm else "none"
         llm, backend, model, notice = self._select_llm(mode)
         error: str | None = notice
         with self.lock:
             try:
                 result = self.pipeline.answer(question, llm=llm, top_k=limit)
             except Exception as exc:
-                if backend != "online":
-                    raise ApiError(f"生成回答失败：{exc}") from exc
-                # 在线调用失败时回落到离线，保证页面仍可演示。
-                error = f"在线模型调用失败，已回落离线 Demo LLM：{exc}"
-                result = self.pipeline.answer(
-                    question, llm=TravelDemoLLM(), top_k=limit
-                )
-                backend, model = "offline", None
+                raise ApiError(f"在线回答失败：{exc}") from exc
             data = result.to_dict()
             data.update(
                 {
@@ -1264,19 +1252,21 @@ class WebState:
         query: str | None = None,
         embed_backend: str = "hashing",
         use_console_kb: bool = False,
-        online: bool = False,
+        online: bool = True,
     ) -> dict[str, Any]:
-        """在独立目录运行完整 Demo，返回报告与产物列表。
+        """在独立目录运行在线 Demo，返回报告与产物列表。
 
         ``use_console_kb`` 为真时，把控制台上传/URL 入库的文档并入本次 Demo
         的临时索引（内置四篇示例已在 Demo 语料中，不重复加入）。
-        ``online`` 为真且配置了 LLM Key 时，自定义问题改用在线 LLM 回答，
-        知识库未命中还会自动联网检索。
+        ``online=True`` 时使用 ``.env`` 配置的在线 LLM 回答 ``query``，报告
+        只包含真实检索与回答；未配置 Key 会直接报错，不再回退离线演示。
         """
         if embed_backend not in {"hashing", "fastembed"}:
             raise ApiError("embed_backend 必须是 hashing 或 fastembed")
         ingest = (ingest or "").strip() or None
         query = (query or "").strip() or None
+        if online and not query:
+            raise ApiError("在线 Demo 需要填写问题")
         sources: list[str] = []
         if use_console_kb:
             with self.lock:
@@ -1287,21 +1277,23 @@ class WebState:
         if online:
             config = Config.from_env()
             self.config = config
-            if config.llm.api_key:
-                answer_llm = OpenAICompatibleLLM(
-                    base_url=config.llm.base_url or None,
-                    api_key=config.llm.api_key,
-                    model=config.llm.model or None,
-                    temperature=config.llm.temperature,
-                    timeout=config.llm.timeout,
+            if not config.llm.api_key:
+                raise ApiError(
+                    "完整 Demo 已改为在线模式：请在项目根目录 .env 配置 "
+                    "LLM_API_KEY（离线演示仅供单元测试使用）"
                 )
-                llm_label = f"在线 LLM · {config.llm.model}"
-                search_fallback = bool(
-                    config.search.fallback
-                    and (config.search.tavily_api_key or config.search.serpapi_api_key)
-                )
-            else:
-                llm_label = "在线 LLM 未配置 Key，已回退离线 TravelDemoLLM"
+            answer_llm = OpenAICompatibleLLM(
+                base_url=config.llm.base_url or None,
+                api_key=config.llm.api_key,
+                model=config.llm.model or None,
+                temperature=config.llm.temperature,
+                timeout=config.llm.timeout,
+            )
+            llm_label = f"在线 LLM · {config.llm.model}"
+            search_fallback = bool(
+                config.search.fallback
+                and (config.search.tavily_api_key or config.search.serpapi_api_key)
+            )
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         run_id = f"run-{stamp}-{int(time.time() * 1000) % 1000:03d}"
         out_dir = self.runs_dir / run_id
@@ -1756,7 +1748,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             self._send_json(
                 state.run_paradigms(
                     payload.get("question"),
-                    bool(payload.get("online", False)),
+                    bool(payload.get("online", True)),
                 )
             )
             return
@@ -1767,7 +1759,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     query=payload.get("query"),
                     embed_backend=str(payload.get("embed_backend") or "hashing"),
                     use_console_kb=bool(payload.get("use_console_kb", False)),
-                    online=bool(payload.get("online", False)),
+                    online=bool(payload.get("online", True)),
                 )
             )
             return

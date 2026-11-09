@@ -22,6 +22,13 @@ class _FakeAnswerLLM:
         return "在线总结：北京雨天优先选择故宫博物院等室内景点。"
 
 
+class _FakeWebAnswerLLM:
+    """模拟在线 LLM 依据网页搜索资料作答。"""
+
+    def chat(self, messages, **kwargs):
+        return "南昌今天小雨，18℃，适合室内景点。"
+
+
 class _FakeSearchTool:
     """联网搜索替身，返回固定摘要。"""
 
@@ -129,13 +136,18 @@ def test_demo_custom_question_uses_online_llm_and_is_prominent(tmp_path):
     )
     report = (tmp_path / "run" / "rag_eval.md").read_text(encoding="utf-8")
 
+    assert result["mode"] == "online"
     assert "- 回答模型：在线 LLM · fake-model" in report
     assert "在线总结：北京雨天优先选择故宫博物院等室内景点。" in report
     assert result["extra_answer"]["answer_source"] == "kb"
     assert result["extra_answer"]["llm"] == "在线 LLM · fake-model"
-    # 自定义问题在固定演示章节之前，避免用户误以为整份报告都在回答自己的问题。
-    assert report.index("## 自定义问题") < report.index("## 固定演示章节")
-    assert "使用内置北京脚本" in report
+    # 在线报告只围绕本次问题组织，不再包含固定北京演示章节。
+    assert report.startswith("# 智游·山水行：在线 RAG Demo")
+    assert "## 问题" in report
+    assert "## 回答" in report
+    assert "## 检索证据" in report
+    assert "## 固定演示章节" not in report
+    assert "## 自定义问题" not in report
 
 
 def test_demo_search_fallback_when_knowledge_misses(tmp_path, monkeypatch):
@@ -144,13 +156,17 @@ def test_demo_search_fallback_when_knowledge_misses(tmp_path, monkeypatch):
     result = run_demo(
         tmp_path / "run",
         query="南昌下雨适合去哪？",
+        answer_llm=_FakeWebAnswerLLM(),
+        llm_label="在线 LLM · fake-model",
         search_fallback=True,
     )
     report = (tmp_path / "run" / "rag_eval.md").read_text(encoding="utf-8")
 
+    assert result["mode"] == "online"
     assert result["extra_answer"]["answer_source"] == "web_search"
     assert result["extra_answer"]["web_search"]["backend"] == "fake-search"
-    assert "### 联网搜索补充" in report
+    assert result["extra_answer"]["answer"].startswith("南昌今天小雨")
+    assert "## 联网搜索补充" in report
     assert "南昌今天小雨，18℃" in report
 
 

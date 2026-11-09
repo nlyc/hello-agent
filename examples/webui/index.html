@@ -45,7 +45,7 @@
 
     <div class="grid-2">
       <article class="card">
-        <header class="card-head"><h2>快速开始</h2><span class="muted">全部操作离线可用</span></header>
+        <header class="card-head"><h2>快速开始</h2><span class="muted">在线能力需配置 .env</span></header>
         <div class="quick-actions">
           <button class="link-btn" data-goto="knowledge" data-preset-query="我想去北京玩一天，有什么景点推荐？">检索北京一日游</button>
           <button class="link-btn" data-goto="knowledge" data-preset-query="北京下雨天适合去哪？">检索雨天备选</button>
@@ -188,8 +188,7 @@ py -3.14 -m pytest -q</pre>
             <label class="field narrow">
               <span>回答模式</span>
               <select id="answer-llm">
-                <option value="auto">自动（有 Key 用在线）</option>
-                <option value="offline">离线 Demo</option>
+                <option value="auto">自动（在线 LLM）</option>
                 <option value="online">在线 LLM</option>
                 <option value="none">仅检索引用</option>
               </select>
@@ -287,7 +286,7 @@ py -3.14 -m pytest -q</pre>
     <article class="card">
       <header class="card-head">
         <h2>ReAct / Reflection / Plan-and-Solve：无记忆 vs 有记忆</h2>
-        <span id="paradigm-mode" class="muted">默认：内置问题 + 离线 LLM</span>
+        <span id="paradigm-mode" class="muted">在线 LLM + 实时检索</span>
       </header>
       <form id="paradigm-form" class="form-col">
         <div class="form-row">
@@ -295,11 +294,10 @@ py -3.14 -m pytest -q</pre>
             <span>问题（留空使用内置问题）</span>
             <input type="text" id="paradigm-input" placeholder="我想去北京玩一天，有什么景点推荐？">
           </label>
-          <label class="check"><input type="checkbox" id="paradigm-online"> 使用在线 LLM（需配置 Key，较慢）</label>
           <button class="primary-btn" type="submit" id="run-paradigms">运行对照</button>
         </div>
       </form>
-      <p class="hint">默认使用脚本化离线 LLM 与固定问题，保证结果可复现；勾选在线 LLM 后才能输入自定义问题。在线模式配置了 Tavily / SerpAPI 时，ReAct 的天气与景点工具会实时联网检索；否则工具输出会标注“演示数据，未联网”，不会把固定气温当成实时结果。每次运行使用独立的临时记忆并写入演示画像，不会污染“记忆”页签中的数据。</p>
+      <p class="hint">三种范式全部使用在线 LLM 与实时检索：ReAct 的天气 / 景点工具直接联网查询，Reflection / Plan-and-Solve 会注入同一份实时检索资料，避免编造日期和气温。需要配置 <span class="mono">LLM_API_KEY</span> 与 <span class="mono">TAVILY_API_KEY</span>（或 SerpAPI）。每次运行使用独立的临时记忆并写入演示画像，不会污染“记忆”页签中的数据。</p>
       <div id="paradigm-question" class="callout hidden"></div>
       <div id="paradigm-results" class="results"></div>
       <div id="workflow-result" class="results"></div>
@@ -327,15 +325,14 @@ py -3.14 -m pytest -q</pre>
           </div>
           <div class="form-row">
             <label class="field grow">
-              <span>额外提问（可选）</span>
-              <input type="text" id="demo-query" placeholder="南昌下雨适合去哪玩？">
+              <span>问题（必填）</span>
+              <input type="text" id="demo-query" placeholder="南昌下雨适合去哪玩？" required>
             </label>
             <label class="check"><input type="checkbox" id="demo-use-kb"> 并入当前知识库（仅你上传的文档）</label>
-            <label class="check"><input type="checkbox" id="demo-online" checked> 额外提问用在线 LLM</label>
-            <button class="primary-btn" type="submit">运行 Demo</button>
+            <button class="primary-btn" type="submit">运行在线 Demo</button>
           </div>
         </form>
-        <p class="hint">主报告的三范式、多轮调整等章节是固定的北京脚本；<strong>只有最上方的“自定义问题”一节针对你输入的额外提问</strong>。勾选“并入当前知识库”后，你上传的文档会加入本次 Demo 的临时索引；勾选“额外提问用在线 LLM”后由模型基于检索资料作答，知识库未命中时自动联网搜索补充。未配置 Key 时自动回退离线模式，报告会标注实际使用的模型。</p>
+        <p class="hint">Demo 已改为<strong>全在线模式</strong>：基于你输入的问题与当前知识库检索，由在线 LLM 生成回答并附引用；知识库未命中时自动联网搜索补充。报告只包含本次问题相关的真实结果，不再输出固定的北京模拟章节。需要配置 <span class="mono">LLM_API_KEY</span>（搜索兜底需 <span class="mono">TAVILY_API_KEY</span> 或 SerpAPI）。</p>
         <p class="hint">输出写入 <span class="mono">.data/webui/runs/&lt;run-id&gt;/</span>，包含 rag_eval.md、memory.json、trace.jsonl。</p>
         <div id="demo-artifacts" class="results"></div>
       </article>

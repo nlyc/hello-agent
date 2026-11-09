@@ -1,6 +1,6 @@
 """地名识别测试：城市检测、排序与自定义地名扩展。"""
 
-from agentflow.retrieval import detect_places
+from agentflow.retrieval import detect_place_candidates, detect_places
 
 
 def test_detects_city_in_question():
@@ -29,3 +29,16 @@ def test_extra_places_are_supported():
 def test_extra_places_from_env(monkeypatch):
     monkeypatch.setenv("RAG_EXTRA_PLACES", "某某镇、某某村")
     assert detect_places("去某某村看花") == ["某某村"]
+
+
+def test_place_candidates_detect_unlisted_scenic_spots():
+    assert detect_place_candidates("去云台山玩两天", extra=[]) == ["云台山"]
+    assert detect_place_candidates("滕王阁下雨天开放吗？", extra=[]) == ["滕王阁"]
+    assert detect_place_candidates("郭亮村几月去最好？", extra=[]) == ["郭亮村"]
+
+
+def test_place_candidates_ignore_generic_words_and_known_places():
+    assert detect_place_candidates("周末去爬山怎么样？", extra=[]) == []
+    assert detect_place_candidates("去公园走走", extra=[]) == []
+    assert detect_place_candidates("南昌下雨天适合去哪？", extra=[]) == []
+    assert detect_place_candidates("", extra=[]) == []

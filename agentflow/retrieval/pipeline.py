@@ -15,7 +15,7 @@ from agentflow.memory.message_history import estimate_tokens
 from agentflow.retrieval.bm25 import BM25Index
 from agentflow.retrieval.chunker import Chunker
 from agentflow.retrieval.embedder import Embedder
-from agentflow.retrieval.entities import detect_places
+from agentflow.retrieval.entities import detect_place_candidates, detect_places
 from agentflow.retrieval.loaders import load_document
 from agentflow.retrieval.retriever import HybridRetriever
 from agentflow.retrieval.types import (
@@ -255,6 +255,10 @@ class RAGPipeline:
             )
         if self.place_guard:
             places = detect_places(question)
+            if not places:
+                # 城市词表未覆盖时，用景区后缀启发式兜底，避免“武功山”
+                # 这类景点被其它城市的语义相似片段冒名回答。
+                places = detect_place_candidates(question)
             if places:
                 covered = [
                     hit

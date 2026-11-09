@@ -842,6 +842,119 @@ def _web_fallback_answer(question: str, llm: Any = None) -> dict[str, Any]:
     return {"backend": backend, "answer": answer, "text": excerpt}
 
 
+def _extra_answer_payload(
+    question: str,
+    answer: Any,
+    llm_label: str,
+    web: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """组装额外问答的结构化结果，供 API / 报告复用。"""
+    if answer.has_answer:
+        answer_text = answer.answer
+        citations = list(answer.citations)
+        answer_source = "kb"
+    elif web is not None and web.get("answer"):
+        # 知识库未命中时，正式回答就是联网搜索的总结，不能继续展示
+        # “知识库暂未收录”的拒答文本。
+        answer_text = str(web["answer"])
+        citations = []
+        answer_source = "web_search"
+    else:
+        answer_text = answer.answer
+        citations = list(answer.citations)
+        answer_source = "none"
+    return {
+        "question": question,
+        "answer": answer_text,
+        "citations": citations,
+        "has_answer": answer.has_answer,
+        "answer_source": answer_source,
+        "llm": llm_label,
+        "web_search": web,
+    }
+
+
+def _render_online_report(
+    *,
+    question: str,
+    answer: Any,
+    llm_label: str,
+    embed_backend: str,
+    embedder: Embedder,
+    ingest_results: Sequence[Any],
+    extra_ingests: Sequence[Any],
+    extra_web: dict[str, Any] | None,
+    hits: Sequence[dict[str, Any]],
+) -> str:
+    """在线 Demo 报告：只呈现与当前问题相关的真实检索与回答。"""
+    payload = _extra_answer_payload(question, answer, llm_label, extra_web)
+    source_label = {
+        "kb": "知识库",
+        "web_search": "联网搜索",
+        "none": "未命中",
+    }[payload["answer_source"]]
+    lines = [
+        "# 智游·山水行：在线 RAG Demo",
+        "",
+        f"- 向量后端：`{embed_backend}`（{embedder.fingerprint}）",
+        f"- 回答模型：{llm_label}",
+        f"- 知识库：{len(ingest_results)} 篇内置示例 + {len(extra_ingests)} 篇本次入库",
+        "",
+        "## 问题",
+        "",
+        question,
+        "",
+        "## 回答",
+        "",
+        f"{payload['answer']}",
+        "",
+        f"- 答案来源：{source_label}",
+        f"- 依据：{'；'.join(payload['citations']) or '无'}",
+        "",
+        "## 检索证据",
+        "",
+    ]
+    if hits:
+        lines.extend(
+            [
+                "| # | 来源 | 相关度 | 片段 |",
+                "| --- | --- | --- | --- |",
+            ]
+        )
+        for index, hit in enumerate(hits, start=1):
+            snippet = re.sub(r"\s+", " ", str(hit.get("text") or "")).strip()[:120]
+            snippet = snippet.replace("|", "\\|")
+            citation = str(hit.get("citation") or hit.get("doc_id") or "—")
+            lines.append(
+                f"| {index} | {citation} | {float(hit.get('score') or 0):.4f} | {snippet} |"
+            )
+    else:
+        lines.append("未检索到知识库片段。")
+    lines.append("")
+    if extra_web is not None:
+        lines.extend(["## 联网搜索补充", ""])
+        if extra_web.get("error"):
+            lines.append(f"- {extra_web['error']}")
+        else:
+            lines.append(f"- 搜索后端：{extra_web.get('backend') or '—'}")
+            lines.append("")
+            lines.append(f"{extra_web.get('answer') or '无'}")
+        lines.append("")
+    if extra_ingests:
+        lines.extend(
+            [
+                "## 本次入库",
+                "",
+                *[
+                    f"- 来源：{item.source_uri}（新增 {item.chunk_count} chunks）"
+                    for item in extra_ingests
+                ],
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def run_demo(
     out_dir: str | Path = DEMO_DIR_NAME,
     *,
@@ -858,8 +971,10 @@ def run_demo(
         out_dir: 输出目录，同时也是 SQLite 数据库与知识库文件的落盘位置。
         embed_backend: ``hashing``（默认，离线）或 ``fastembed``（需安装 extras）。
         ingest: 额外入库的本地路径或公网 URL；支持单个或多个（可选，失败会抛清晰异常）。
-        query: 额外问答的问题；为空时不做。
-        answer_llm: 额外问答使用的 LLM；为空时用离线 ``TravelDemoLLM``。
+        query: 额外问答的问题；在线模式下必填。
+        answer_llm: 在线回答使用的 LLM；非空时进入在线模式，报告只包含
+            与 ``query`` 相关的真实检索与回答，不再输出固定北京演示章节。
+            为空时保留离线固定演示，供 CLI / 单元测试向后兼容。
         llm_label: 报告中展示的回答模型标签，便于区分离线 / 在线。
         search_fallback: 额外问答在知识库未命中时是否自动联网检索。
 
@@ -908,14 +1023,6 @@ def run_demo(
             for path in knowledge_paths
         ]
 
-        seed_memory(memory)
-        paradigms = demo_paradigms(memory, tracer)
-        workflow_answer = demo_workflow(tracer)
-        itinerary = demo_itinerary(memory, tracer)
-        cross_session = demo_cross_session(embedder, memory_db, tracer)
-        uploads = demo_uploads(pipeline, output / "uploads", tracer)
-        rag_rows = demo_rag_compare(pipeline)
-
         # 先入库再提问，保证 --ingest 的文档能被 --query 检索到。
         if ingest is None:
             ingest_sources: list[str] = []
@@ -928,10 +1035,83 @@ def run_demo(
         extra_ingests = [
             pipeline.ingest(source, namespace="travel") for source in ingest_sources
         ]
+
+        if answer_llm is not None:
+            # ---------- 在线模式：只输出当前问题的真实检索与回答 ----------
+            if not query:
+                raise ValueError("在线 Demo 需要提供问题")
+            tracer.emit("start", "online-demo", data={"question": query})
+            for result in (*ingest_results, *extra_ingests):
+                tracer.emit("rag.ingest", "online-demo", data=result.to_dict())
+            answer = pipeline.answer(query, llm=answer_llm)
+            extra_web: dict[str, Any] | None = None
+            if not answer.has_answer and search_fallback:
+                extra_web = _web_fallback_answer(query, answer_llm)
+            payload = _extra_answer_payload(query, answer, llm_label, extra_web)
+            tracer.emit(
+                "rag.answer",
+                "online-demo",
+                data={
+                    "question": query,
+                    "has_answer": answer.has_answer,
+                    "answer_source": payload["answer_source"],
+                    "citations": list(answer.citations),
+                },
+            )
+            tracer.emit("end", "online-demo")
+
+            hits = [hit.to_dict() for hit in answer.hits]
+            memory_payload = {
+                "user_id": DEMO_USER_ID,
+                "mode": "online",
+                "question": query,
+                "stats": memory.stats(),
+            }
+            (output / "memory.json").write_text(
+                json.dumps(memory_payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            report_text = _render_online_report(
+                question=query,
+                answer=answer,
+                llm_label=llm_label,
+                embed_backend=embed_backend,
+                embedder=embedder,
+                ingest_results=ingest_results,
+                extra_ingests=extra_ingests,
+                extra_web=extra_web,
+                hits=hits,
+            )
+            (output / "rag_eval.md").write_text(report_text, encoding="utf-8")
+            return {
+                "out_dir": str(output),
+                "mode": "online",
+                "embed_backend": embed_backend,
+                "stats": pipeline.stats(),
+                "ingest": [result.to_dict() for result in ingest_results],
+                "extra_ingest": [item.to_dict() for item in extra_ingests],
+                "extra_answer": payload,
+                "hits": hits,
+                "paradigms": [],
+                "uploads": [],
+                "rag_compare": [],
+                "itinerary": None,
+                "cross_session": None,
+                "workflow_answer": "",
+                "report": report_text,
+            }
+
+        # ---------- 离线固定演示（仅 CLI / 单元测试向后兼容） ----------
+        seed_memory(memory)
+        paradigms = demo_paradigms(memory, tracer)
+        workflow_answer = demo_workflow(tracer)
+        itinerary = demo_itinerary(memory, tracer)
+        cross_session = demo_cross_session(embedder, memory_db, tracer)
+        uploads = demo_uploads(pipeline, output / "uploads", tracer)
+        rag_rows = demo_rag_compare(pipeline)
+
         extra_answer = (
-            pipeline.answer(query, llm=answer_llm or TravelDemoLLM())
-            if query
-            else None
+            pipeline.answer(query, llm=TravelDemoLLM()) if query else None
         )
         extra_web: dict[str, Any] | None = None
         if (
@@ -939,7 +1119,7 @@ def run_demo(
             and not extra_answer.has_answer
             and search_fallback
         ):
-            extra_web = _web_fallback_answer(query, answer_llm)
+            extra_web = _web_fallback_answer(query, None)
 
         memory_payload = {
             "user_id": DEMO_USER_ID,
@@ -1036,23 +1216,11 @@ def run_demo(
         report_text = "\n".join(report_lines)
         (output / "rag_eval.md").write_text(report_text, encoding="utf-8")
 
-        extra_payload = None
-        if query is not None and extra_answer is not None:
-            if extra_answer.has_answer:
-                answer_source = "kb"
-            elif extra_web is not None and extra_web.get("answer"):
-                answer_source = "web_search"
-            else:
-                answer_source = "none"
-            extra_payload = {
-                "question": query,
-                "answer": extra_answer.answer,
-                "citations": list(extra_answer.citations),
-                "has_answer": extra_answer.has_answer,
-                "answer_source": answer_source,
-                "llm": llm_label,
-                "web_search": extra_web,
-            }
+        extra_payload = (
+            _extra_answer_payload(query, extra_answer, llm_label, extra_web)
+            if query is not None and extra_answer is not None
+            else None
+        )
 
         return {
             "out_dir": str(output),

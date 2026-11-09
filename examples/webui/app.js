@@ -631,7 +631,6 @@
         .join('');
       const backendLabel = {
         online: `在线 LLM${data.llm_model ? ` · ${data.llm_model}` : ''}`,
-        offline: '离线 Demo LLM',
         retrieval: '仅检索（无 LLM）',
       }[data.llm_backend] || data.llm_backend || '—';
       const error = data.llm_error
@@ -677,7 +676,7 @@
           : data.answer_source === 'web_search'
             ? `知识库未命中，已联网检索（${data.web_search?.backend || '—'}）`
             : data.llm_error
-              ? '在线模型不可用，已回落离线回答'
+              ? '在线模型调用失败，请检查 .env 配置'
               : data.has_answer
                 ? '已生成带引用的回答'
                 : '知识库中未找到相关内容',
@@ -850,25 +849,16 @@
   async function runParadigms(event) {
     event.preventDefault();
     const question = $('#paradigm-input').value.trim();
-    const online = $('#paradigm-online').checked;
-    if (question && !online) {
-      toast('自定义问题需要勾选“使用在线 LLM”', 'err');
-      return;
-    }
     await withBusy(
       $('#run-paradigms'),
-      online ? '运行中…（在线 LLM 可能较慢）' : '运行三范式…',
+      '运行中…（在线 LLM + 实时检索，可能较慢）',
       async () => {
         const data = await api('/api/paradigms/run', {
           method: 'POST',
-          body: { question, online },
+          body: { question, online: true },
         });
-        const label = data.llm_backend === 'online'
-          ? `在线 LLM${data.llm_model ? ` · ${data.llm_model}` : ''}`
-          : '离线脚本 LLM';
-        const toolLabel = data.llm_backend === 'online'
-          ? (data.real_tools ? ' · 工具：实时联网' : ' · 工具：演示数据')
-          : '';
+        const label = `在线 LLM${data.llm_model ? ` · ${data.llm_model}` : ''}`;
+        const toolLabel = data.real_tools ? ' · 工具：实时联网' : ' · 工具：未配置搜索';
         $('#paradigm-mode').textContent = `${label}${toolLabel}`;
         const questionBox = $('#paradigm-question');
         questionBox.classList.remove('hidden');
@@ -935,7 +925,7 @@
   async function runDemo(event) {
     event.preventDefault();
     const button = event.submitter || $('#demo-form button');
-    await withBusy(button, '运行中…（约 10–40 秒）', async () => {
+    await withBusy(button, '运行中…（在线 LLM 生成，约 10–60 秒）', async () => {
       const data = await api('/api/demo/run', {
         method: 'POST',
         body: {
@@ -943,7 +933,7 @@
           ingest: $('#demo-ingest').value.trim() || null,
           query: $('#demo-query').value.trim() || null,
           use_console_kb: $('#demo-use-kb').checked,
-          online: $('#demo-online').checked,
+          online: true,
         },
       });
       const kbCount = data.console_kb_docs ?? 0;

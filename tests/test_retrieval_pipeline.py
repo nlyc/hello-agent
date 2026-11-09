@@ -146,6 +146,17 @@ def test_answer_refuses_uncovered_city(tmp_path: Path, pipeline: RAGPipeline):
     assert answer.citations == []
 
 
+def test_answer_refuses_uncovered_scenic_spot(tmp_path: Path, pipeline: RAGPipeline):
+    """问题点名词表未收录的景点时，也不能用其它城市的资料凑答案。"""
+    pipeline.ingest(_write(tmp_path / "guide.md", GUIDE))
+
+    answer = pipeline.answer("云台山故宫几点开放？")
+    assert answer.has_answer is False
+    assert "未收录" in answer.answer
+    assert "云台山" in answer.answer
+    assert answer.hits == []
+
+
 def test_answer_keeps_only_covered_city(tmp_path: Path, pipeline: RAGPipeline):
     pipeline.ingest(_write(tmp_path / "guide.md", GUIDE))
     pipeline.ingest(_write(tmp_path / "nanchang.md", NANCHANG))

@@ -150,7 +150,7 @@ def test_answer_has_citations(console):
         base,
         "/api/answer",
         method="POST",
-        payload={"question": "我想去北京玩一天，有什么景点推荐？", "top_k": 5},
+        payload={"question": "我想去北京玩一天，有什么景点推荐？", "top_k": 5, "llm_mode": "none"},
     )
 
     assert payload["answer"].strip()
@@ -256,15 +256,25 @@ def test_answer_llm_modes_without_key(console, monkeypatch):
     base, _ = console
     monkeypatch.delenv("LLM_API_KEY", raising=False)
 
-    auto = _json(
+    # auto 与 online 都要求在线 LLM，未配置 Key 时直接报错，不再回落离线。
+    for mode in ("auto", "online"):
+        status, _, body = _request(
+            base,
+            "/api/answer",
+            method="POST",
+            payload={"question": "北京有哪些景点？", "llm_mode": mode},
+        )
+        assert status == 400, mode
+        assert "LLM_API_KEY" in json.loads(body.decode("utf-8"))["error"]
+
+    status, _, body = _request(
         base,
         "/api/answer",
         method="POST",
-        payload={"question": "北京有哪些景点？", "llm_mode": "auto"},
+        payload={"question": "北京有哪些景点？", "llm_mode": "offline"},
     )
-    assert auto["llm_backend"] == "offline"
-    assert auto["llm_error"]
-    assert auto["citations"]
+    assert status == 400
+    assert "离线回答模式已移除" in json.loads(body.decode("utf-8"))["error"]
 
     none = _json(
         base,
@@ -274,23 +284,6 @@ def test_answer_llm_modes_without_key(console, monkeypatch):
     )
     assert none["llm_backend"] == "retrieval"
     assert "llm_error" not in none or not none["llm_error"]
-
-    offline = _json(
-        base,
-        "/api/answer",
-        method="POST",
-        payload={"question": "北京有哪些景点？", "llm_mode": "offline"},
-    )
-    assert offline["llm_backend"] == "offline"
-
-    status, _, body = _request(
-        base,
-        "/api/answer",
-        method="POST",
-        payload={"question": "北京有哪些景点？", "llm_mode": "online"},
-    )
-    assert status == 400
-    assert "LLM_API_KEY" in json.loads(body.decode("utf-8"))["error"]
 
 
 def test_select_llm_uses_online_when_key_configured(console, monkeypatch):
@@ -615,7 +608,9 @@ def test_memory_snapshot_lists_seeded_items(console):
 
 def test_paradigms_run_produces_comparison(console):
     base, _ = console
-    payload = _json(base, "/api/paradigms/run", method="POST", payload={})
+    payload = _json(
+        base, "/api/paradigms/run", method="POST", payload={"online": False}
+    )
 
     assert payload["question"]
     rows = {row["paradigm"]: row for row in payload["rows"]}
@@ -644,11 +639,12 @@ def test_paradigms_reject_custom_question_offline(console):
 def test_paradigms_online_requires_key(console, monkeypatch):
     base, _ = console
     monkeypatch.delenv("LLM_API_KEY", raising=False)
+    # 省略 online 时默认在线，未配置 Key 直接报错。
     status, _, body = _request(
         base,
         "/api/paradigms/run",
         method="POST",
-        payload={"question": "南昌下雨天适合去哪？", "online": True},
+        payload={"question": "南昌下雨天适合去哪？"},
     )
     assert status == 400
     assert "LLM_API_KEY" in json.loads(body.decode("utf-8"))["error"]
@@ -780,8 +776,11 @@ def test_seed_toggle_removes_builtins_and_persists(console):
     assert enabled["memory"]["stats"]["long_term"]["memories"] >= 2
 
 
-def test_demo_can_use_console_uploads(console):
+def test_demo_can_use_console_uploads(console, monkeypatch):
     base, _ = console
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_MODEL", "fake-model")
+    monkeypatch.setattr(web_app, "OpenAICompatibleLLM", _FakeDemoAnswerLLM)
     content = "# 南昌旅行知识\n\n## 滕王阁\n\n滕王阁位于赣江边，雨天开放，室内展厅可参观。\n"
     _json(
         base,
@@ -808,8 +807,32 @@ def test_demo_can_use_console_uploads(console):
     assert payload["console_kb_docs"] == 1
     assert len(payload["extra_ingest"]) == 1
     assert payload["extra_ingest"][0]["source_uri"].endswith("nanchang.md")
-    assert "## 额外入库" in payload["report"]
-    assert "南昌旅行知识" in payload["report"]
+    assert "## 本次入库" in payload["report"]
+    assert "南昌" in payload["report"]
+    assert payload["extra_answer"]["answer_source"] == "kb"
+
+
+def test_demo_online_default_requires_question_and_key(console, monkeypatch):
+    base, _ = console
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+
+    status, _, body = _request(
+        base,
+        "/api/demo/run",
+        method="POST",
+        payload={"embed_backend": "hashing"},
+    )
+    assert status == 400
+    assert "问题" in json.loads(body.decode("utf-8"))["error"]
+
+    status, _, body = _request(
+        base,
+        "/api/demo/run",
+        method="POST",
+        payload={"embed_backend": "hashing", "query": "南昌下雨适合去哪？"},
+    )
+    assert status == 400
+    assert "LLM_API_KEY" in json.loads(body.decode("utf-8"))["error"]
 
 
 class _FakeDemoAnswerLLM:
@@ -843,6 +866,10 @@ def test_demo_online_answers_with_llm_label(console, monkeypatch):
     assert payload["extra_answer"]["answer_source"] == "kb"
     assert "在线 LLM · fake-model" in payload["report"]
     assert "在线总结：北京雨天优先选择故宫博物院等室内景点。" in payload["report"]
+    # 在线 Demo 报告只包含本次问题，不再输出固定北京章节。
+    assert "## 问题" in payload["report"]
+    assert "## 检索证据" in payload["report"]
+    assert "## 固定演示章节" not in payload["report"]
 
 
 # --------------------------------------------------------------------- 评估与测试

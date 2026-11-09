@@ -63,7 +63,7 @@ Copy-Item .env.example .env    # 然后按需填写
 | 在线 LLM | `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` / `LLM_TEMPERATURE` / `LLM_TIMEOUT` |
 | 联网搜索 | `TAVILY_API_KEY` / `SERPAPI_API_KEY` / `SEARCH_MAX_RESULTS`（Tavily 优先，失败回落 SerpAPI）/ `SEARCH_FALLBACK`（知识库未命中时自动联网作答，默认开启） |
 | 语义向量 | `EMBED_BACKEND`（`hashing`/`fastembed`）/ `FASTEMBED_MODEL` / `FASTEMBED_CACHE_PATH` / `HF_ENDPOINT`（默认 `https://hf-mirror.com`） |
-| 检索与回答 | `RAG_MIN_SCORE`（向量召回相似度下限，0=关闭）/ `RAG_PLACE_GUARD`（地名覆盖校验）/ `RAG_EXTRA_PLACES`（追加城市名） |
+| 检索与回答 | `RAG_MIN_SCORE`（向量召回相似度下限，0=关闭）/ `RAG_PLACE_GUARD`（地名覆盖校验）/ `RAG_EXTRA_PLACES`（追加地名，逗号/顿号/空格分隔）。地名校验先匹配内置城市与常见景点词表，再用“山/湖/古镇/博物馆/…”后缀启发式识别未收录景点；问题点名的地点在检索结果中不存在时直接拒答并触发联网兜底。静态词表无法穷举全国所有景点，冷门地名请写入 `RAG_EXTRA_PLACES` |
 | 向量库 | `VECTOR_STORE`（`sqlite`/`qdrant`）/ `RAG_SQLITE_PATH` / `QDRANT_URL` / `QDRANT_API_KEY` / `QDRANT_COLLECTION` / `QDRANT_TIMEOUT` / `QDRANT_PREFER_GRPC` |
 | 记忆 | `MEMORY_ENABLED` / `MEMORY_SQLITE_PATH` / `MEMORY_TOP_K` / `USER_ID` |
 | Agent | `AGENT_MAX_STEPS` / `AGENT_MAX_TOOL_ITERATIONS` / `MAX_HISTORY_LENGTH` / `DEBUG` |
@@ -81,18 +81,19 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 | 页签 | 能做什么 |
 |---|---|
 | 概览 | 索引 / 记忆统计、运行环境、检索与在线能力（切换 Embedding / 向量库、查看 LLM/搜索/Qdrant 配置与 SQLite 占用）、快捷入口；可关闭“写入内置示例”（4 篇知识文档 + 2 条演示记忆），关闭后立即移除并在重启后保持关闭，也可用 `--no-seed` 启动 |
-| 知识库 / RAG | 上传 MD/TXT/PDF/DOCX、公网 URL 入库、删除文档、混合 / BM25 / 向量检索、带引用问答（自动 / 在线 LLM / 离线 Demo / 仅检索）；问题点名但知识库未收录的城市会明确提示，不用其它城市凑答案；若配置了搜索 Key 且 `SEARCH_FALLBACK=true`，会自动联网检索并由在线 LLM 总结（回答标注“答案来源：联网搜索”） |
+| 知识库 / RAG | 上传 MD/TXT/PDF/DOCX、公网 URL 入库、删除文档、混合 / BM25 / 向量检索、带引用问答（自动 / 在线 LLM / 仅检索）；问题点名但知识库未收录的城市或景点会明确提示，不用其它地点凑答案；若配置了搜索 Key 且 `SEARCH_FALLBACK=true`，会自动联网检索并由在线 LLM 总结（回答标注“答案来源：联网搜索”） |
 | 记忆 | 写入 semantic/episodic/procedural 记忆、记录对话轮次、检索、构建注入上下文、清空；首次启动的 2 条北京演示记忆可通过“概览”开关移除 |
-| 三范式 | ReAct / Reflection / Plan-and-Solve 无记忆 vs 有记忆对照（使用隔离的临时记忆）；默认固定问题 + 脚本化离线 LLM，勾选在线 LLM 后可输入自定义问题；配置搜索 Key 时天气 / 景点工具与模型上下文改用实时联网资料，未配置时工具输出标注“演示数据，未联网” |
-| 完整 Demo | 调用 `demo_travel_memory_rag`，查看报告与产物下载；固定章节使用内置北京脚本，最上方的“自定义问题”才是你输入的额外提问；可勾选“并入当前知识库”把上传文档加入临时索引，并勾选在线 LLM 生成回答（知识库未命中时自动联网补充） |
+| 三范式 | ReAct / Reflection / Plan-and-Solve 无记忆 vs 有记忆对照（使用隔离的临时记忆）；始终使用在线 LLM，ReAct 的天气 / 景点工具直接联网查询，Reflection / Plan-and-Solve 注入同一份实时检索资料；需要配置 `LLM_API_KEY` 与 `TAVILY_API_KEY`（或 SerpAPI） |
+| 完整 Demo | 全在线模式：基于你输入的问题与当前知识库检索，由在线 LLM 生成带引用的回答，知识库未命中时自动联网补充；报告只包含本次问题的真实结果，不再输出固定北京模拟章节；可勾选“并入当前知识库”把上传文档加入临时索引；需要 `LLM_API_KEY` |
 | RAG 评估 | 运行 `scripts/eval_rag.py` 的固定 benchmark（`data/eval/travel_qa.jsonl` + 内置四城语料），展示 recall@k / MRR / 事实命中 / 引用覆盖；不评估控制台上传的文档 |
 | 测试 | 列出并运行 `tests/test_*.py`（子进程 + 白名单校验） |
 
 接口为同源 JSON API（`/api/status`、`/api/settings`、`/api/settings/embed`、`/api/settings/vector`、
 `/api/settings/seed`、`/api/answer`、`/api/ingest`、`/api/search`、`/api/memory/*`、
 `/api/paradigms/run`、`/api/demo/run`、`/api/eval/run`、`/api/tests/run` 等），也可直接用 `curl` 调用。
-`/api/paradigms/run` 支持 `{"question": "...", "online": true}` 切换在线 LLM；
-`/api/demo/run` 支持 `{"use_console_kb": true, "online": true}` 并入控制台上传的文档并用在线 LLM 回答额外提问。
+`/api/paradigms/run` 默认 `{"online": true}`（在线 LLM + 实时检索），未配置 `LLM_API_KEY` 时返回 400；
+`/api/demo/run` 默认在线模式，必须提供 `query`，并支持 `{"use_console_kb": true}` 并入控制台上传的文档；
+`/api/answer` 的 `llm_mode` 支持 `auto` / `online` / `none`，离线回答模式已移除。
 
 ## 交付物清单
 
@@ -100,7 +101,7 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 |---|---|---|
 | D1 | 代码仓库（零外部框架依赖） | 本仓库 |
 | D2 | 架构图（Mermaid + PNG） | [`docs/architecture.md`](docs/architecture.md) + [`docs/architecture.png`](docs/architecture.png) |
-| D3 | 单元测试（284 个通过 / 3 跳过，全绿） | [`tests/`](tests/) |
+| D3 | 单元测试（288 个通过 / 3 跳过，全绿） | [`tests/`](tests/) |
 | D4 | 端到端演示 | [`examples/demo_e2e.py`](examples/demo_e2e.py) |
 | D5 | API 设计文档 | [`docs/api-design.md`](docs/api-design.md) |
 | D6 | 三范式轨迹对比报告 | [`docs/trajectory-comparison.md`](docs/trajectory-comparison.md) |
@@ -129,3 +130,4 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 - [x] M8.10 知识库未命中时自动联网检索作答
 - [x] M8.11 控制台自定义数据模式：内置示例开关、在线三范式与 Demo 并入当前知识库
 - [x] M8.12 在线模式真实数据：三范式实时天气 / 景点工具与 Demo 自定义问题在线作答
+- [x] M8.13 全在线演示：移除离线回答与固定 Demo 章节；未收录景点启发式识别并联网兜底
