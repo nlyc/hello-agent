@@ -49,6 +49,7 @@ from examples.demo_travel_memory_rag import (
     DEMO_USER_ID,
     KNOWLEDGE_DOCS,
     MAIN_QUESTION,
+    SEED_MEMORY_TEXTS,
     TravelDemoLLM,
     demo_paradigms,
     demo_workflow,
@@ -168,10 +169,11 @@ class WebState:
 
         self.lock = threading.RLock()
         self.job_lock = threading.Lock()
-        self._seed_enabled = bool(seed)
         self.config = Config.from_env()
         self.settings_path = self.data_dir / "settings.json"
         saved = self._load_settings()
+        # 页面可持久关闭内置示例；命令行 --no-seed 始终优先。
+        self._seed_enabled = bool(seed) and saved.get("seed_demo", True) is not False
 
         self.embed_backend = self._pick_embed_backend(
             saved.get("embed_backend"), self.config.retrieval.embed_backend
@@ -193,7 +195,7 @@ class WebState:
         self._apply_stack(stack)
         self.documents: list[dict[str, Any]] = self._load_manifest()
 
-        if seed:
+        if self._seed_enabled:
             with self.lock:
                 try:
                     self._seed()
@@ -230,6 +232,7 @@ class WebState:
         payload = {
             "embed_backend": self.embed_backend,
             "vector_store": self.vector_store_kind,
+            "seed_demo": self._seed_enabled,
         }
         temp = self.settings_path.with_suffix(".json.tmp")
         temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -456,6 +459,7 @@ class WebState:
                 "max_results": config.search.max_results,
                 "fallback": config.search.fallback,
             },
+            "seed_demo": self._seed_enabled,
             "store_error": self.store_error,
         }
 
@@ -475,6 +479,101 @@ class WebState:
             "total_bytes": total,
             "total_mb": round(total / (1024 * 1024), 2),
         }
+
+    def set_demo_seed(self, enabled: bool) -> dict[str, Any]:
+        """开启/关闭内置示例（4 篇知识文档 + 2 条演示记忆）。
+
+        关闭时立即移除内置文档与演示记忆，并持久化到 ``settings.json``，
+        重启后不再自动写入；开启时会补回缺失的部分。用户自己的数据不受影响。
+        """
+        enabled = bool(enabled)
+        with self.lock:
+            removed_documents = 0
+            removed_memories = 0
+            if not enabled:
+                removed_documents = self._remove_builtin_documents()
+                removed_memories = self._remove_seed_memories()
+            self._seed_enabled = enabled
+            self._save_settings()
+            if enabled:
+                self._seed()
+                self._ensure_seed_memories()
+            return {
+                "seed_demo": self._seed_enabled,
+                "removed_documents": removed_documents,
+                "removed_memories": removed_memories,
+                "settings": self.settings(),
+                "documents": list(self.documents),
+                "stats": self.pipeline.stats(),
+                "memory": self.memory_snapshot(),
+            }
+
+    def _remove_builtin_documents(self) -> int:
+        """删除清单中来源为本机 knowledge 目录的内置文档。"""
+        root = self.knowledge_dir.resolve()
+        targets: list[str] = []
+        for entry in self.documents:
+            raw = str(entry.get("source_uri") or "").strip()
+            if not raw:
+                continue
+            try:
+                resolved = Path(raw).resolve()
+            except OSError:
+                continue
+            if resolved.is_relative_to(root):
+                targets.append(str(entry.get("doc_id") or ""))
+        targets = [doc_id for doc_id in targets if doc_id]
+        for doc_id in targets:
+            self.rag_store.delete(doc_id, self.namespace)
+            self.bm25.remove_doc(doc_id, self.namespace)
+        if targets:
+            self.documents = [
+                entry
+                for entry in self.documents
+                if str(entry.get("doc_id") or "") not in set(targets)
+            ]
+            self._save_manifest()
+        return len(targets)
+
+    def _remove_seed_memories(self) -> int:
+        """删除内容与演示记忆完全一致的长期 / 工作记忆。"""
+        seed_texts = {text.strip() for text in SEED_MEMORY_TEXTS}
+        removed = 0
+        try:
+            hits = self.long_term.search("", top_k=10000)
+        except Exception:
+            hits = []
+        for hit in hits:
+            if hit.content.strip() in seed_texts and self.long_term.remove(hit.memory_id):
+                removed += 1
+        for item in self.memory.working.all_items():
+            if item.content.strip() in seed_texts and self.memory.working.remove(
+                item.item_id
+            ):
+                removed += 1
+        return removed
+
+    def _ensure_seed_memories(self) -> None:
+        """开启示例时补齐缺失的演示记忆（不重复写入已有内容）。"""
+        try:
+            existing = {
+                hit.content.strip()
+                for hit in self.long_term.search("", top_k=10000)
+            }
+        except Exception:
+            existing = set()
+        spec = (
+            (SEED_MEMORY_TEXTS[0], "semantic", 0.9, {"topic": "preference"}),
+            (SEED_MEMORY_TEXTS[1], "episodic", 0.8, {"topic": "itinerary"}),
+        )
+        for content, memory_type, importance, metadata in spec:
+            if content not in existing:
+                self.memory.add(
+                    content,
+                    importance=importance,
+                    memory_type=memory_type,
+                    metadata=metadata,
+                )
 
     def switch_embed_backend(self, backend: str) -> dict[str, Any]:
         """在线切换 embedding 后端：自动切换存储并重建索引。"""
@@ -1072,8 +1171,40 @@ class WebState:
 
     # --- 三范式与 Demo ----------------------------------------------------
 
-    def run_paradigms(self) -> dict[str, Any]:
-        """用独立的临时记忆跑三范式对照，避免污染控制台记忆。"""
+    def run_paradigms(
+        self, question: str | None = None, online: bool = False
+    ) -> dict[str, Any]:
+        """跑三范式记忆对照。
+
+        默认使用内置问题与脚本化离线 LLM；``online=True`` 时改用 ``.env``
+        配置的在线 LLM，支持自定义问题（结果不再保证可复现）。
+        """
+        question = str(question or "").strip() or MAIN_QUESTION
+        if len(question) > 200:
+            raise ApiError("问题过长（最多 200 字）")
+        llm: Any = None
+        llm_model: str | None = None
+        if online:
+            config = Config.from_env()
+            self.config = config
+            if not config.llm.api_key:
+                raise ApiError(
+                    "未配置 LLM_API_KEY，无法使用在线 LLM 跑三范式；"
+                    "请在项目根目录 .env 中填写"
+                )
+            llm = OpenAICompatibleLLM(
+                base_url=config.llm.base_url or None,
+                api_key=config.llm.api_key,
+                model=config.llm.model or None,
+                temperature=config.llm.temperature,
+                timeout=config.llm.timeout,
+            )
+            llm_model = config.llm.model
+        elif question != MAIN_QUESTION:
+            raise ApiError(
+                "离线三范式只支持内置问题；自定义问题请勾选“使用在线 LLM”"
+            )
+
         with self.job_lock:
             embedder = HashingEmbedder()
             store = LongTermMemory(embedder, path=":memory:", user_id="demo_run")
@@ -1081,12 +1212,26 @@ class WebState:
                 memory = MemoryManager(embedder, store, user_id="demo_run")
                 seed_memory(memory)
                 tracer = Tracer()
-                rows = demo_paradigms(memory, tracer)
-                workflow = demo_workflow(tracer)
+                try:
+                    rows = demo_paradigms(
+                        memory,
+                        tracer,
+                        question=question,
+                        llm_factory=(lambda: llm) if llm is not None else TravelDemoLLM,
+                    )
+                    workflow_answer = demo_workflow(
+                        tracer, question=question, llm=llm
+                    )
+                except Exception as exc:
+                    if not online:
+                        raise
+                    raise ApiError(f"在线 LLM 执行三范式失败：{exc}") from exc
                 return {
-                    "question": MAIN_QUESTION,
+                    "question": question,
                     "rows": rows,
-                    "workflow_answer": workflow,
+                    "workflow_answer": workflow_answer,
+                    "llm_backend": "online" if online else "offline",
+                    "llm_model": llm_model,
                 }
             finally:
                 store.close()
@@ -1097,21 +1242,33 @@ class WebState:
         ingest: str | None = None,
         query: str | None = None,
         embed_backend: str = "hashing",
+        use_console_kb: bool = False,
     ) -> dict[str, Any]:
-        """在独立目录运行完整 Demo，返回报告与产物列表。"""
+        """在独立目录运行完整 Demo，返回报告与产物列表。
+
+        ``use_console_kb`` 为真时，把控制台上传/URL 入库的文档并入本次 Demo
+        的临时索引（内置四篇示例已在 Demo 语料中，不重复加入）。
+        """
         if embed_backend not in {"hashing", "fastembed"}:
             raise ApiError("embed_backend 必须是 hashing 或 fastembed")
         ingest = (ingest or "").strip() or None
         query = (query or "").strip() or None
+        sources: list[str] = []
+        if use_console_kb:
+            with self.lock:
+                sources = self._console_upload_sources()
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         run_id = f"run-{stamp}-{int(time.time() * 1000) % 1000:03d}"
         out_dir = self.runs_dir / run_id
+        ingest_sources = list(sources)
+        if ingest:
+            ingest_sources.append(ingest)
         with self.job_lock:
             try:
                 result = run_demo(
                     out_dir,
                     embed_backend=embed_backend,
-                    ingest=ingest,
+                    ingest=ingest_sources or None,
                     query=query,
                 )
             except Exception as exc:
@@ -1127,8 +1284,33 @@ class WebState:
             "itinerary": result["itinerary"],
             "cross_session": result["cross_session"],
             "workflow_answer": result["workflow_answer"],
+            "extra_ingest": result.get("extra_ingest") or [],
+            "console_kb_docs": len(sources),
             "artifacts": self._run_files(out_dir),
         }
+
+    def _console_upload_sources(self) -> list[str]:
+        """返回控制台已入库的上传/URL 文档路径（不含内置示例）。"""
+        root = self.uploads_dir.resolve()
+        sources: list[str] = []
+        seen: set[str] = set()
+        for entry in self.documents:
+            raw = str(entry.get("source_uri") or "").strip()
+            if not raw:
+                continue
+            path = Path(raw)
+            try:
+                resolved = path.resolve()
+            except OSError:
+                continue
+            if not resolved.is_file() or not resolved.is_relative_to(root):
+                continue
+            key = str(resolved)
+            if key in seen:
+                continue
+            seen.add(key)
+            sources.append(key)
+        return sources
 
     def _run_files(self, out_dir: Path) -> list[dict[str, Any]]:
         """列出某次 Demo 允许下载的产物。"""
@@ -1476,6 +1658,9 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 state.switch_vector_store(str(payload.get("backend") or ""))
             )
             return
+        if method == "POST" and path == "/api/settings/seed":
+            self._send_json(state.set_demo_seed(bool(payload.get("enabled", True))))
+            return
         if method == "POST" and path == "/api/documents/clear":
             self._send_json(state.clear_documents())
             return
@@ -1517,7 +1702,12 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             self._send_json(state.memory_clear())
             return
         if method == "POST" and path == "/api/paradigms/run":
-            self._send_json(state.run_paradigms())
+            self._send_json(
+                state.run_paradigms(
+                    payload.get("question"),
+                    bool(payload.get("online", False)),
+                )
+            )
             return
         if method == "POST" and path == "/api/demo/run":
             self._send_json(
@@ -1525,6 +1715,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     ingest=payload.get("ingest"),
                     query=payload.get("query"),
                     embed_backend=str(payload.get("embed_backend") or "hashing"),
+                    use_console_kb=bool(payload.get("use_console_kb", False)),
                 )
             )
             return

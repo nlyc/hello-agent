@@ -350,6 +350,12 @@
       ? `${qdrant.url} · 集合 ${qdrant.collection}`
       : '未配置 QDRANT_URL';
 
+    const seedToggle = $('#seed-toggle');
+    if (seedToggle) seedToggle.checked = settings.seed_demo !== false;
+    $('#seed-hint').textContent = settings.seed_demo === false
+      ? '已关闭：重启后不再写入内置文档与演示记忆'
+      : '内置：4 篇知识文档 + 2 条演示记忆';
+
     const pill = $('#settings-pill');
     const error = $('#settings-error');
     if (settings.store_error) {
@@ -414,6 +420,31 @@
       await refreshDocuments().catch(reason);
       toast(messages.length ? messages.join('；') : '配置未变化');
     }).catch(reason);
+  }
+
+  async function toggleSeed(event) {
+    const enabled = event.target.checked;
+    event.target.disabled = true;
+    try {
+      const data = await api('/api/settings/seed', {
+        method: 'POST',
+        body: { enabled },
+      });
+      if (data.settings) renderSettings(data.settings);
+      state.loaded.delete('knowledge');
+      state.loaded.delete('memory');
+      await loadStatus();
+      await refreshDocuments().catch(() => {});
+      $('#seed-hint').textContent = enabled
+        ? `已启用 · 当前 ${(data.documents || []).length} 篇文档`
+        : `已关闭 · 移除 ${data.removed_documents} 篇内置文档、${data.removed_memories} 条记忆条目`;
+      toast(enabled ? '已启用内置示例' : '已移除内置示例，仅保留你的数据');
+    } catch (error) {
+      event.target.checked = !enabled;
+      reason(error);
+    } finally {
+      event.target.disabled = false;
+    }
   }
 
   // ------------------------------------------------------------------ 知识库
@@ -816,16 +847,33 @@
 
   // ------------------------------------------------------------------ 三范式
 
-  async function runParadigms() {
-    await withBusy($('#run-paradigms'), '运行三范式…', async () => {
-      const data = await api('/api/paradigms/run', { method: 'POST', body: {} });
-      const question = $('#paradigm-question');
-      question.classList.remove('hidden');
-      question.textContent = `提问：${data.question || ''}`;
+  async function runParadigms(event) {
+    event.preventDefault();
+    const question = $('#paradigm-input').value.trim();
+    const online = $('#paradigm-online').checked;
+    if (question && !online) {
+      toast('自定义问题需要勾选“使用在线 LLM”', 'err');
+      return;
+    }
+    await withBusy(
+      $('#run-paradigms'),
+      online ? '运行中…（在线 LLM 可能较慢）' : '运行三范式…',
+      async () => {
+        const data = await api('/api/paradigms/run', {
+          method: 'POST',
+          body: { question, online },
+        });
+        const label = data.llm_backend === 'online'
+          ? `在线 LLM${data.llm_model ? ` · ${data.llm_model}` : ''}`
+          : '离线脚本 LLM';
+        $('#paradigm-mode').textContent = label;
+        const questionBox = $('#paradigm-question');
+        questionBox.classList.remove('hidden');
+        questionBox.textContent = `提问：${data.question || ''}（${label}）`;
 
-      $('#paradigm-results').innerHTML = (data.rows || [])
-        .map(
-          (row) => `
+        $('#paradigm-results').innerHTML = (data.rows || [])
+          .map(
+            (row) => `
           <div class="paradigm-block">
             <div class="paradigm-head"><span>${esc(row.paradigm)}</span><span class="muted">无记忆 vs 有记忆</span></div>
             <div class="paradigm-body">
@@ -833,14 +881,15 @@
               <div class="paradigm-cell with"><h4>有记忆</h4><p>${esc(row.with_memory || '')}</p></div>
             </div>
           </div>`
-        )
-        .join('');
+          )
+          .join('');
 
-      $('#workflow-result').innerHTML = data.workflow_answer
-        ? `<article class="answer-box"><h3 class="sub-title">工作流输出</h3><p>${esc(data.workflow_answer)}</p></article>`
-        : '';
-      toast('三范式对照完成');
-    }).catch(reason);
+        $('#workflow-result').innerHTML = data.workflow_answer
+          ? `<article class="answer-box"><h3 class="sub-title">工作流输出</h3><p>${esc(data.workflow_answer)}</p></article>`
+          : '';
+        toast('三范式对照完成');
+      }
+    ).catch(reason);
   }
 
   // -------------------------------------------------------------------- Demo
@@ -890,12 +939,14 @@
           embed_backend: $('#demo-embed').value,
           ingest: $('#demo-ingest').value.trim() || null,
           query: $('#demo-query').value.trim() || null,
+          use_console_kb: $('#demo-use-kb').checked,
         },
       });
+      const kbCount = data.console_kb_docs ?? 0;
       $('#demo-artifacts').innerHTML = `
         <article class="hit">
           <div class="hit-head"><span class="chip">${esc(data.run_id)}</span>
-            <span class="muted">chunks ${esc((data.stats || {}).chunks ?? '—')}</span></div>
+            <span class="muted">chunks ${esc((data.stats || {}).chunks ?? '—')} · 控制台文档 ${kbCount} 篇</span></div>
           <div class="run-files">${artifactsHtml(data.artifacts)}</div>
         </article>`;
       $('#demo-run-label').textContent = data.run_id;
@@ -1091,7 +1142,9 @@
       $('#importance-out').textContent = Number(event.target.value).toFixed(1);
     });
 
-    $('#run-paradigms').addEventListener('click', runParadigms);
+    $('#seed-toggle').addEventListener('change', toggleSeed);
+
+    $('#paradigm-form').addEventListener('submit', runParadigms);
 
     $('#demo-form').addEventListener('submit', runDemo);
     $('#refresh-runs').addEventListener('click', () => loadRuns().catch(reason));

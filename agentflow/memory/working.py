@@ -154,6 +154,16 @@ class WorkingMemory:
         self._purge_expired()
         return list(self._items)
 
+    def remove(self, item_id: str) -> bool:
+        """删除指定条目；不存在或已过期时返回 False。"""
+        self._purge_expired()
+        target = str(item_id or "")
+        if not target:
+            return False
+        before = len(self._items)
+        self._items = [item for item in self._items if item.item_id != target]
+        return len(self._items) != before
+
     def clear(self) -> None:
         """清空工作记忆。"""
         self._items.clear()

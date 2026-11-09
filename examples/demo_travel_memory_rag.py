@@ -41,7 +41,7 @@ import sys
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable, Sequence
 
 # 直接以脚本方式运行时，把仓库根目录加进 sys.path，保证 `import agentflow` / `import examples`
 if __package__ in (None, ""):
@@ -58,6 +58,7 @@ from agentflow.retrieval import (
     HashingEmbedder,
     RAGPipeline,
     SQLiteVectorStore,
+    detect_places,
     load_document,
 )
 from agentflow.trace import JSONLFileCallback, Tracer
@@ -141,6 +142,11 @@ KNOWLEDGE_DOCS: list[dict[str, str]] = [
 DEMO_USER_ID = "demo_user"
 MAIN_QUESTION = "我想去北京玩一天，有什么景点推荐？"
 DEMO_DIR_NAME = "demo_output"
+# 控制台“只使用我的数据”模式据此识别并移除演示记忆。
+SEED_MEMORY_TEXTS: tuple[str, str] = (
+    "用户偏好自然风光，不喜欢爬坡。",
+    "用户计划北京三日游：第 1 天故宫，第 2 天香山，第 3 天颐和园。",
+)
 
 _KNOWLEDGE_TITLE = {doc["doc_id"]: doc["title"] for doc in KNOWLEDGE_DOCS}
 
@@ -283,13 +289,13 @@ def _bigram_overlap(query: str, text: str) -> int:
 # --- Demo a：三范式记忆对照 -----------------------------------------------
 
 
-def _build_agent(paradigm: str, llm: TravelDemoLLM, memory: Any, tracer: Tracer):
-    """按范式名构建智能体；三范式共享同一套离线 LLM 与记忆。"""
+def _build_agent(paradigm: str, llm: Any, memory: Any, tracer: Tracer):
+    """按范式名构建智能体；三范式共享同一套 LLM 与记忆。"""
     if paradigm == "react":
         registry = make_registry(
             weather_fn=lambda city: f"{city}今天晴，22℃，适合户外",
             attraction_fn=lambda city, weather: (
-                f"{city}天气{weather}，优先推荐颐和园东宫门至长廊一线"
+                f"{city}天气{weather}，推荐市内的博物馆、公园与地标景点"
             ),
         )
         return ReActAgent(
@@ -314,14 +320,24 @@ def _build_agent(paradigm: str, llm: TravelDemoLLM, memory: Any, tracer: Tracer)
     )
 
 
-def demo_paradigms(memory: MemoryManager, tracer: Tracer) -> list[dict[str, str]]:
-    """a. 三范式在有 / 无记忆下的回答对照。"""
+def demo_paradigms(
+    memory: MemoryManager,
+    tracer: Tracer,
+    *,
+    question: str = MAIN_QUESTION,
+    llm_factory: Callable[[], Any] = TravelDemoLLM,
+) -> list[dict[str, str]]:
+    """a. 三范式在有 / 无记忆下的回答对照。
+
+    ``llm_factory`` 让控制台可以切换到在线 LLM；离线默认仍使用脚本化
+    ``TravelDemoLLM``，保证结果可复现。
+    """
     rows: list[dict[str, str]] = []
     for paradigm in ("react", "reflection", "plan_solve"):
-        without = _build_agent(paradigm, TravelDemoLLM(), None, tracer).run(MAIN_QUESTION)
+        without = _build_agent(paradigm, llm_factory(), None, tracer).run(question)
         with_memory = _build_agent(
-            paradigm, TravelDemoLLM(), memory, tracer
-        ).run(MAIN_QUESTION)
+            paradigm, llm_factory(), memory, tracer
+        ).run(question)
         rows.append(
             {
                 "paradigm": paradigm,
@@ -332,16 +348,27 @@ def demo_paradigms(memory: MemoryManager, tracer: Tracer) -> list[dict[str, str]
     return rows
 
 
-def demo_workflow(tracer: Tracer) -> str:
-    """低代码工作流同样复用离线 LLM，验证 M8 改动未破坏 v1.0 形态。"""
+def demo_workflow(
+    tracer: Tracer,
+    *,
+    question: str = MAIN_QUESTION,
+    llm: Any = None,
+    city: str | None = None,
+) -> str:
+    """低代码工作流同样可切换 LLM，验证 M8 改动未破坏 v1.0 形态。"""
+    if city is None:
+        detected = detect_places(question)
+        city = detected[0] if detected else "北京"
     graph = build_travel_graph(
         TravelDeps(
-            llm=TravelDemoLLM(),
+            llm=llm or TravelDemoLLM(),
             weather_tool=lambda city: f"{city}今天晴，22℃",
-            attraction_tool=lambda city, weather, **_: f"{city}天气{weather}，推荐颐和园",
+            attraction_tool=lambda city, weather, **_: (
+                f"{city}天气{weather}，推荐市内的博物馆与地标景点"
+            ),
         )
     )
-    state = graph.invoke({"user_query": MAIN_QUESTION, "city": "北京"})
+    state = graph.invoke({"user_query": question, "city": city})
     return str(state.get("final_answer", ""))
 
 
@@ -697,7 +724,7 @@ def run_demo(
     out_dir: str | Path = DEMO_DIR_NAME,
     *,
     embed_backend: str = "hashing",
-    ingest: str | None = None,
+    ingest: str | Sequence[str] | None = None,
     query: str | None = None,
 ) -> dict[str, Any]:
     """运行完整 Demo 并写出 trace / memory / rag_eval 三个产物。
@@ -705,7 +732,7 @@ def run_demo(
     参数：
         out_dir: 输出目录，同时也是 SQLite 数据库与知识库文件的落盘位置。
         embed_backend: ``hashing``（默认，离线）或 ``fastembed``（需安装 extras）。
-        ingest: 额外入库的本地路径或公网 URL（选修，失败会抛清晰异常）。
+        ingest: 额外入库的本地路径或公网 URL；支持单个或多个（可选，失败会抛清晰异常）。
         query: 额外问答的问题；为空时不做。
 
     返回：
@@ -762,10 +789,17 @@ def run_demo(
         rag_rows = demo_rag_compare(pipeline)
 
         # 先入库再提问，保证 --ingest 的文档能被 --query 检索到。
-        if ingest:
-            extra_ingest = pipeline.ingest(ingest, namespace="travel")
+        if ingest is None:
+            ingest_sources: list[str] = []
+        elif isinstance(ingest, str):
+            ingest_sources = [ingest] if ingest.strip() else []
         else:
-            extra_ingest = None
+            ingest_sources = [
+                str(item).strip() for item in ingest if str(item).strip()
+            ]
+        extra_ingests = [
+            pipeline.ingest(source, namespace="travel") for source in ingest_sources
+        ]
         extra_answer = pipeline.answer(query, llm=TravelDemoLLM()) if query else None
 
         memory_payload = {
@@ -822,13 +856,15 @@ def run_demo(
                     "",
                 ]
             )
-        if extra_ingest is not None:
+        if extra_ingests:
             report_lines.extend(
                 [
                     "## 额外入库",
                     "",
-                    f"- 来源：{extra_ingest.source_uri}",
-                    f"- 新增 chunk：{extra_ingest.chunk_count}",
+                    *[
+                        f"- 来源：{item.source_uri}（新增 {item.chunk_count} chunks）"
+                        for item in extra_ingests
+                    ],
                     "",
                 ]
             )
@@ -840,6 +876,7 @@ def run_demo(
             "embed_backend": embed_backend,
             "stats": pipeline.stats(),
             "ingest": [result.to_dict() for result in ingest_results],
+            "extra_ingest": [item.to_dict() for item in extra_ingests],
             "paradigms": paradigms,
             "uploads": uploads,
             "rag_compare": rag_rows,
@@ -865,14 +902,15 @@ def _city_for(doc_id: str) -> str:
 
 def seed_memory(memory: MemoryManager) -> None:
     """写入演示用的用户画像与行程记忆。"""
+    preference, itinerary_text = SEED_MEMORY_TEXTS
     memory.add(
-        "用户偏好自然风光，不喜欢爬坡。",
+        preference,
         importance=0.9,
         memory_type="semantic",
         metadata={"topic": "preference"},
     )
     memory.add(
-        "用户计划北京三日游：第 1 天故宫，第 2 天香山，第 3 天颐和园。",
+        itinerary_text,
         importance=0.8,
         memory_type="episodic",
         metadata={"topic": "itinerary"},

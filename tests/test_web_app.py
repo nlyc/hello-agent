@@ -179,6 +179,7 @@ def test_settings_endpoint(console):
     assert payload["llm"]["configured"] is False
     assert payload["search"]["tavily_configured"] is False
     assert payload["search"]["fallback"] is True
+    assert payload["seed_demo"] is True
     assert payload["qdrant"]["configured"] is False
     assert payload["sqlite"]["total_bytes"] > 0
     assert any(file["name"].endswith(".sqlite3") for file in payload["sqlite"]["files"])
@@ -219,7 +220,11 @@ def test_switch_embed_backend_rebuilds_and_persists(console, monkeypatch):
 
     # 选择写入 settings.json，重启后沿用。
     saved = json.loads(state.settings_path.read_text(encoding="utf-8"))
-    assert saved == {"embed_backend": "fastembed", "vector_store": "sqlite"}
+    assert saved == {
+        "embed_backend": "fastembed",
+        "vector_store": "sqlite",
+        "seed_demo": True,
+    }
 
     # 切到同一后端是幂等操作。
     same = _json(
@@ -619,6 +624,150 @@ def test_paradigms_run_produces_comparison(console):
         assert row["with_memory"].strip()
         assert row["without_memory"] != row["with_memory"]
     assert payload["workflow_answer"].strip()
+    assert payload["llm_backend"] == "offline"
+
+
+def test_paradigms_reject_custom_question_offline(console):
+    base, _ = console
+    status, _, body = _request(
+        base,
+        "/api/paradigms/run",
+        method="POST",
+        payload={"question": "南昌下雨天适合去哪？", "online": False},
+    )
+    assert status == 400
+    assert "在线 LLM" in json.loads(body.decode("utf-8"))["error"]
+
+
+def test_paradigms_online_requires_key(console, monkeypatch):
+    base, _ = console
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    status, _, body = _request(
+        base,
+        "/api/paradigms/run",
+        method="POST",
+        payload={"question": "南昌下雨天适合去哪？", "online": True},
+    )
+    assert status == 400
+    assert "LLM_API_KEY" in json.loads(body.decode("utf-8"))["error"]
+
+
+class _FakeOnlineLLM:
+    """在线 LLM 替身：按提示词形态返回可解析的最小输出。"""
+
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+
+    def chat(self, messages, **kwargs):
+        prompt = "\n".join(str(item.get("content", "")) for item in messages)
+        if kwargs.get("json_mode"):
+            return json.dumps(
+                {
+                    "thought": "用户询问南昌雨天安排",
+                    "intent": "南昌雨天室内景点",
+                    "weather_query": "南昌今天天气",
+                    "attraction_query": "南昌 室内景点 推荐",
+                },
+                ensure_ascii=False,
+            )
+        if "必须是一个Python列表" in prompt:
+            return '```python\n["检索南昌室内景点"]\n```'
+        if "评审专家" in prompt:
+            return "无需改进"
+        if "输出格式要求" in prompt:
+            return "Thought: 直接回答\nAction: Finish[南昌雨天可去滕王阁与博物馆]"
+        return "南昌雨天可去滕王阁与博物馆"
+
+
+def test_paradigms_online_supports_custom_question(console, monkeypatch):
+    base, _ = console
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_MODEL", "fake-model")
+    monkeypatch.setattr(web_app, "OpenAICompatibleLLM", _FakeOnlineLLM)
+
+    payload = _json(
+        base,
+        "/api/paradigms/run",
+        method="POST",
+        payload={"question": "南昌下雨天适合去哪？", "online": True},
+    )
+
+    assert payload["question"] == "南昌下雨天适合去哪？"
+    assert payload["llm_backend"] == "online"
+    assert payload["llm_model"] == "fake-model"
+    rows = {row["paradigm"]: row for row in payload["rows"]}
+    assert set(rows) == {"react", "reflection", "plan_solve"}
+    for row in rows.values():
+        assert row["without_memory"].strip()
+        assert row["with_memory"].strip()
+    assert "南昌" in payload["workflow_answer"]
+
+
+def test_seed_toggle_removes_builtins_and_persists(console):
+    base, state = console
+    initial = _json(base, "/api/documents")
+    assert len(initial["documents"]) == len(KNOWLEDGE_DOCS)
+    assert _json(base, "/api/memory")["stats"]["long_term"]["memories"] >= 2
+
+    removed = _json(
+        base, "/api/settings/seed", method="POST", payload={"enabled": False}
+    )
+    assert removed["seed_demo"] is False
+    assert removed["removed_documents"] == len(KNOWLEDGE_DOCS)
+    assert removed["documents"] == []
+    assert removed["stats"]["chunks"] == 0
+    assert removed["memory"]["stats"]["long_term"]["memories"] == 0
+    assert removed["memory"]["stats"]["working"]["items"] == 0
+    saved = json.loads(state.settings_path.read_text(encoding="utf-8"))
+    assert saved["seed_demo"] is False
+
+    # 重启后不会恢复内置文档与演示记忆。
+    restarted = WebState(state.data_dir)
+    try:
+        assert restarted.documents == []
+        assert restarted.long_term.count() == 0
+        assert restarted._seed_enabled is False
+    finally:
+        restarted.close()
+
+    enabled = _json(
+        base, "/api/settings/seed", method="POST", payload={"enabled": True}
+    )
+    assert enabled["seed_demo"] is True
+    assert len(enabled["documents"]) == len(KNOWLEDGE_DOCS)
+    assert enabled["memory"]["stats"]["long_term"]["memories"] >= 2
+
+
+def test_demo_can_use_console_uploads(console):
+    base, _ = console
+    content = "# 南昌旅行知识\n\n## 滕王阁\n\n滕王阁位于赣江边，雨天开放，室内展厅可参观。\n"
+    _json(
+        base,
+        "/api/ingest",
+        method="POST",
+        payload={
+            "filename": "nanchang.md",
+            "content_base64": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+            "title": "南昌旅行知识",
+        },
+    )
+
+    payload = _json(
+        base,
+        "/api/demo/run",
+        method="POST",
+        payload={
+            "embed_backend": "hashing",
+            "use_console_kb": True,
+            "query": "滕王阁下雨天开放吗？",
+        },
+    )
+
+    assert payload["console_kb_docs"] == 1
+    assert len(payload["extra_ingest"]) == 1
+    assert payload["extra_ingest"][0]["source_uri"].endswith("nanchang.md")
+    assert "## 额外入库" in payload["report"]
+    assert "南昌旅行知识" in payload["report"]
 
 
 # --------------------------------------------------------------------- 评估与测试

@@ -80,17 +80,19 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 
 | 页签 | 能做什么 |
 |---|---|
-| 概览 | 索引 / 记忆统计、运行环境、检索与在线能力（切换 Embedding / 向量库、查看 LLM/搜索/Qdrant 配置与 SQLite 占用）、快捷入口 |
+| 概览 | 索引 / 记忆统计、运行环境、检索与在线能力（切换 Embedding / 向量库、查看 LLM/搜索/Qdrant 配置与 SQLite 占用）、快捷入口；可关闭“写入内置示例”（4 篇知识文档 + 2 条演示记忆），关闭后立即移除并在重启后保持关闭，也可用 `--no-seed` 启动 |
 | 知识库 / RAG | 上传 MD/TXT/PDF/DOCX、公网 URL 入库、删除文档、混合 / BM25 / 向量检索、带引用问答（自动 / 在线 LLM / 离线 Demo / 仅检索）；问题点名但知识库未收录的城市会明确提示，不用其它城市凑答案；若配置了搜索 Key 且 `SEARCH_FALLBACK=true`，会自动联网检索并由在线 LLM 总结（回答标注“答案来源：联网搜索”） |
-| 记忆 | 写入 semantic/episodic/procedural 记忆、记录对话轮次、检索、构建注入上下文、清空 |
-| 三范式 | ReAct / Reflection / Plan-and-Solve 无记忆 vs 有记忆对照（使用隔离的临时记忆） |
-| 完整 Demo | 调用 `demo_travel_memory_rag`，查看报告与产物下载 |
-| RAG 评估 | 运行 `scripts/eval_rag.py` 的后端评估，展示 recall@k / MRR / 事实命中 / 引用覆盖 |
+| 记忆 | 写入 semantic/episodic/procedural 记忆、记录对话轮次、检索、构建注入上下文、清空；首次启动的 2 条北京演示记忆可通过“概览”开关移除 |
+| 三范式 | ReAct / Reflection / Plan-and-Solve 无记忆 vs 有记忆对照（使用隔离的临时记忆）；默认固定问题 + 脚本化离线 LLM，勾选在线 LLM 后可输入自定义问题 |
+| 完整 Demo | 调用 `demo_travel_memory_rag`，查看报告与产物下载；主报告是固定脚本，可勾选“并入当前知识库”把你上传的文档加入本次 Demo 的临时索引 |
+| RAG 评估 | 运行 `scripts/eval_rag.py` 的固定 benchmark（`data/eval/travel_qa.jsonl` + 内置四城语料），展示 recall@k / MRR / 事实命中 / 引用覆盖；不评估控制台上传的文档 |
 | 测试 | 列出并运行 `tests/test_*.py`（子进程 + 白名单校验） |
 
 接口为同源 JSON API（`/api/status`、`/api/settings`、`/api/settings/embed`、`/api/settings/vector`、
-`/api/answer`、`/api/ingest`、`/api/search`、`/api/memory/*`、`/api/paradigms/run`、
-`/api/demo/run`、`/api/eval/run`、`/api/tests/run` 等），也可直接用 `curl` 调用。
+`/api/settings/seed`、`/api/answer`、`/api/ingest`、`/api/search`、`/api/memory/*`、
+`/api/paradigms/run`、`/api/demo/run`、`/api/eval/run`、`/api/tests/run` 等），也可直接用 `curl` 调用。
+`/api/paradigms/run` 支持 `{"question": "...", "online": true}` 切换在线 LLM；
+`/api/demo/run` 支持 `{"use_console_kb": true}` 并入控制台上传的文档。
 
 ## 交付物清单
 
@@ -123,3 +125,6 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 - [x] M8.6 回归与交付检查（[`docs/m8-delivery-check.md`](docs/m8-delivery-check.md)）
 - [x] M8.7 浏览器 Web 控制台与 Demo 完整报告输出
 - [x] M8.8 统一 .env 配置、在线 LLM 回答、Embedding / 向量库在线切换、远程 Qdrant 接入
+- [x] M8.9 检索相关性阈值与地名覆盖校验
+- [x] M8.10 知识库未命中时自动联网检索作答
+- [x] M8.11 控制台自定义数据模式：内置示例开关、在线三范式与 Demo 并入当前知识库

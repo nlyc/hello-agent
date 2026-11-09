@@ -60,6 +60,11 @@
 py -3.14 -m examples.demo_travel_memory_rag --out-dir demo_output
 py -3.14 scripts/eval_rag.py --out docs/m8-memory-rag-eval.md
 py -3.14 -m pytest -q</pre>
+        <form id="seed-form" class="form-row">
+          <label class="check"><input type="checkbox" id="seed-toggle"> 写入内置示例</label>
+          <span id="seed-hint" class="muted">4 篇知识文档 + 2 条演示记忆</span>
+        </form>
+        <p class="hint">关闭后立即移除内置文档与演示记忆，并在重启后保持关闭；你上传的文档和写入的记忆不受影响。</p>
       </article>
 
       <article class="card">
@@ -137,6 +142,7 @@ py -3.14 -m pytest -q</pre>
           <button class="primary-btn" type="submit">抓取并入库</button>
         </form>
         <p class="hint">出于安全考虑，URL 抓取默认拒绝内网 / 回环地址；抓取结果会落盘到数据目录，重启后无需重新联网。</p>
+        <p class="hint">内置示例文档可在下表删除；若希望重启后不再恢复，请在“概览”关闭“写入内置示例”，或启动时加 <span class="mono">--no-seed</span>。</p>
 
         <div class="table-wrap">
           <table class="data-table">
@@ -209,6 +215,8 @@ py -3.14 -m pytest -q</pre>
       <article class="stat"><span class="stat-label">向量维度</span><strong id="mem-dim">—</strong><span class="stat-sub">与索引一致</span></article>
     </div>
 
+    <p class="hint">本页读写的是当前用户自己的记忆。首次启动会写入 2 条北京演示记忆；可在“概览”关闭内置示例，或直接“清空记忆”。</p>
+
     <div class="grid-2">
       <article class="card">
         <header class="card-head"><h2>写入记忆</h2><button id="clear-memory" class="ghost-btn danger">清空记忆</button></header>
@@ -279,9 +287,19 @@ py -3.14 -m pytest -q</pre>
     <article class="card">
       <header class="card-head">
         <h2>ReAct / Reflection / Plan-and-Solve：无记忆 vs 有记忆</h2>
-        <button id="run-paradigms" class="primary-btn">运行对照</button>
+        <span id="paradigm-mode" class="muted">默认：内置问题 + 离线 LLM</span>
       </header>
-      <p class="hint">每次运行使用独立的临时记忆并写入演示画像，不会污染“记忆”页签中的数据。</p>
+      <form id="paradigm-form" class="form-col">
+        <div class="form-row">
+          <label class="field grow">
+            <span>问题（留空使用内置问题）</span>
+            <input type="text" id="paradigm-input" placeholder="我想去北京玩一天，有什么景点推荐？">
+          </label>
+          <label class="check"><input type="checkbox" id="paradigm-online"> 使用在线 LLM（需配置 Key，较慢）</label>
+          <button class="primary-btn" type="submit" id="run-paradigms">运行对照</button>
+        </div>
+      </form>
+      <p class="hint">默认使用脚本化离线 LLM 与固定问题，保证结果可复现；勾选在线 LLM 后才能输入自定义问题。每次运行使用独立的临时记忆并写入演示画像，不会污染“记忆”页签中的数据。</p>
       <div id="paradigm-question" class="callout hidden"></div>
       <div id="paradigm-results" class="results"></div>
       <div id="workflow-result" class="results"></div>
@@ -312,9 +330,11 @@ py -3.14 -m pytest -q</pre>
               <span>额外提问（可选）</span>
               <input type="text" id="demo-query" placeholder="北京下雨天适合去哪？">
             </label>
+            <label class="check"><input type="checkbox" id="demo-use-kb"> 并入当前知识库（仅你上传的文档）</label>
             <button class="primary-btn" type="submit">运行 Demo</button>
           </div>
         </form>
+        <p class="hint">主报告是固定的北京脚本；勾选“并入当前知识库”后，你上传的文档会加入本次 Demo 的临时索引，可用于“额外提问”。内置四篇示例已在 Demo 语料中，不会重复加入。</p>
         <p class="hint">输出写入 <span class="mono">.data/webui/runs/&lt;run-id&gt;/</span>，包含 rag_eval.md、memory.json、trace.jsonl。</p>
         <div id="demo-artifacts" class="results"></div>
       </article>
@@ -350,6 +370,7 @@ py -3.14 -m pytest -q</pre>
         </label>
         <label class="check"><input type="checkbox" id="eval-online"> 允许联网加载 FastEmbed（首次会下载模型）</label>
       </form>
+      <p class="hint">这是固定基准：题集来自 <span class="mono">data/eval/travel_qa.jsonl</span>，语料为内置四城示例，用于横向比较检索后端；<strong>不会评估你在“知识库”上传的文档</strong>。</p>
       <div id="eval-metrics" class="results"></div>
       <div id="eval-report" class="markdown"></div>
     </article>
