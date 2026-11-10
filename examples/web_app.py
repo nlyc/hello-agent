@@ -1828,6 +1828,13 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             "/styles.css": ("styles.css", "text/css; charset=utf-8"),
             "/app.js": ("app.js", "text/javascript; charset=utf-8"),
         }
+        if path == "/done.wav":
+            # 任务完成提示音：直接使用项目根目录的 WAV，替换文件无需改代码。
+            target = PROJECT_ROOT / "878253__qvantor__ui-pop-up-open.wav"
+            if not target.is_file():
+                raise ApiError("提示音文件缺失", 404)
+            self._send_bytes(target.read_bytes(), "audio/wav")
+            return
         entry = files.get(path)
         if entry is None:
             raise ApiError("未找到页面", 404)

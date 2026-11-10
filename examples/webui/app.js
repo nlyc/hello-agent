@@ -56,6 +56,25 @@
     }, kind === 'err' ? 6000 : 3200);
   }
 
+  let doneAudio = null;
+  // 长时间任务结束后播放一次提示音；浏览器拒绝时静默忽略，不影响结果。
+  function playDoneSound() {
+    try {
+      if (!doneAudio) {
+        doneAudio = new Audio('/done.wav');
+        doneAudio.preload = 'auto';
+        doneAudio.volume = 0.7;
+      }
+      doneAudio.currentTime = 0;
+      const played = doneAudio.play();
+      if (played && typeof played.catch === 'function') {
+        played.catch(() => {});
+      }
+    } catch {
+      /* 静音策略或浏览器不支持音频时忽略 */
+    }
+  }
+
   async function withBusy(button, label, task) {
     const original = button ? button.textContent : '';
     if (button) {
@@ -881,6 +900,7 @@
           ? `<article class="answer-box"><h3 class="sub-title">工作流输出</h3><p>${esc(data.workflow_answer)}</p></article>`
           : '';
         toast('三范式对照完成');
+        playDoneSound();
       }
     ).catch(reason);
   }
@@ -955,6 +975,7 @@
       $('#demo-run-label').textContent = data.run_id;
       setMarkdown('#demo-report', data.report, '本次运行没有报告内容。');
       toast(`Demo 完成：${data.run_id}`);
+      playDoneSound();
       await loadRuns();
       markFresh('demo');
     }).catch(reason);

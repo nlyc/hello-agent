@@ -88,6 +88,14 @@ def test_static_pages_are_served(console):
         assert "charset=utf-8" in headers["Content-Type"], path
 
 
+def test_done_sound_is_served(console):
+    base, _ = console
+    status, headers, body = _request(base, "/done.wav")
+    assert status == 200
+    assert headers["Content-Type"].startswith("audio/wav")
+    assert body[:4] == b"RIFF"
+
+
 def test_unknown_page_returns_json_404(console):
     base, _ = console
     status, _, body = _request(base, "/nope")
