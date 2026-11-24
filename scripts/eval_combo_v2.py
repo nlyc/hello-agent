@@ -38,12 +38,11 @@ from agentflow.evaluation import (
     write_report,
 )
 from agentflow.notes import NoteContextSource, NoteStore
-from agentflow.protocols.a2a import A2AClient
+from agentflow.protocols.a2a import A2AClient, A2AServer
 from agentflow.protocols.mcp import MCPTool
 from agentflow.retrieval.pipeline import RAG_SYSTEM_PROMPT
 from agentflow.retrieval.types import RAGAnswer
 from agentflow.tools import ToolRegistry
-from examples.demo_a2a_travel import build_servers
 from scripts.eval_online_v2 import (
     CallableAgent,
     ContextRAG,
@@ -190,16 +189,62 @@ def run_s4(llm, args) -> list[tuple[str, Any]]:
     return [("tool_calling_S0", s0), ("tool_calling_S4_mcp", s4)]
 
 
+def build_llm_servers(llm: Any) -> tuple[A2AServer, A2AServer, A2AServer]:
+    """S5：规划师使用真实 LLM，资料员与审查员为确定性技能。"""
+    research = A2AServer("资料员", "收集北京事实")
+
+    @research.skill("gather_facts", "按用户需求收集北京事实")
+    def gather_facts(payload):
+        question = str(payload.get("input", "") or "")
+        return (
+            f"用户需求：{question}\n"
+            "北京：故宫周一闭馆，需提前预约；颐和园东宫门一线平缓；"
+            "预算与同行人以用户需求为准。"
+        )
+
+    planner = A2AServer("规划师", "使用 LLM 生成两日行程")
+
+    @planner.skill("plan_itinerary", "根据资料生成行程")
+    def plan_itinerary(payload):
+        facts = str(payload.get("input", "") or "")
+        return llm.chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是旅行规划师。根据资料为带父母的北京两日游写计划："
+                        "必须写 D1/D2、预算、同行人约束，并标注依据。"
+                    ),
+                },
+                {"role": "user", "content": f"资料：{facts}"},
+            ],
+            temperature=0.0,
+        )
+
+    reviewer = A2AServer("审查员", "确定性审查")
+
+    @reviewer.skill("review_plan", "审查行程")
+    def review_plan(payload):
+        plan = str(payload.get("input", "") or "")
+        return f"审查：已避开周一闭馆，路线平缓。\n{plan}"
+
+    return research, planner, reviewer
+
+
 def run_s5(llm, args) -> list[tuple[str, Any]]:
     dataset = EvalDataset.load(DATA / "itinerary_tasks.jsonl", name="quality")
-    cases = dataset.cases[:1]  # 集成烟测：固定北京案例
-    research, planner, reviewer = build_servers()
+    cases = [
+        case for case in dataset.cases if "北京" in case.question
+    ][: args.limit]
+    research, planner, reviewer = build_llm_servers(llm)
     try:
         urls = [research.start(), planner.start(), reviewer.start()]
-        clients = [A2AClient(url, timeout=30) for url in urls]
+        clients = [A2AClient(url, timeout=180) for url in urls]
 
         def answer(question: str) -> str:
-            facts = clients[0].execute_skill("gather_facts", {"input": "北京"})[0].content
+            facts = clients[0].execute_skill(
+                "gather_facts", {"input": question}
+            )[0].content
             plan = clients[1].execute_skill(
                 "plan_itinerary", {"input": facts}
             )[0].content
@@ -212,7 +257,7 @@ def run_s5(llm, args) -> list[tuple[str, Any]]:
             CallableAgent(answer), judge=LLMJudge(llm)
         ).run(cases)
         report.manifest["dataset_sha256"] = dataset.sha256
-        return [("quality_S5_a2a", report)]
+        return [("quality_S5_a2a_llm", report)]
     finally:
         for server in (research, planner, reviewer):
             server.stop()

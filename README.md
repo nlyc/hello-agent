@@ -65,7 +65,10 @@ py -3.14 scripts/eval_v2.py --suite all --limit 5
 py -3.14 scripts/eval_online_v2.py --suites all --limit 3 --out .cache/eval_online_full
 
 # v2.0：S2–S5 组合验证（Notes / MCP / A2A）
-py -3.14 scripts/eval_combo_v2.py --suite all --limit 3 --out .cache/eval_combo
+py -3.14 scripts/eval_combo_v2.py --suite all --limit 6 --out .cache/eval_combo_s6
+
+# v2.0：原生 Function Calling 对照（与 ReAct 同 12 题）
+py -3.14 scripts/eval_online_v2.py --suites tool_calling --agent fc --limit 12 --out .cache/eval_online_fc
 
 # 架构图 PNG（交付物 D2）
 py -3.14 scripts/render_architecture.py

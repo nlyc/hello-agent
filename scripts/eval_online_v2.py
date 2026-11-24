@@ -19,7 +19,7 @@ from typing import Any
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentflow.agents import ReActAgent
+from agentflow.agents import FunctionCallAgent, ReActAgent
 from agentflow.context import (
     ContextBuilder,
     ContextConfig,
@@ -156,8 +156,10 @@ def build_pipeline() -> Any:
 
 
 def run_tool_calling(llm, dataset, args) -> list[tuple[str, Any]]:
-    agent = ReActAgent(
-        name="online-react",
+    agent_cls = FunctionCallAgent if args.agent == "fc" else ReActAgent
+    label = "S0_fc" if args.agent == "fc" else "S0_react"
+    agent = agent_cls(
+        name=f"online-{args.agent}",
         llm=llm,
         tools=build_registry(),
         config=Config(agent=AgentConfig(max_steps=8)),
@@ -166,9 +168,9 @@ def run_tool_calling(llm, dataset, args) -> list[tuple[str, Any]]:
         dataset.cases,
         category=args.category,
         limit=args.limit,
-        system=f"S0_react:{llm.model}",
+        system=f"{label}:{llm.model}",
     )
-    return [("tool_calling_S0", report)]
+    return [("tool_calling_" + label, report)]
 
 
 def run_qa(llm, dataset, args) -> list[tuple[str, Any]]:
@@ -252,6 +254,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--limit", type=int, default=3, help="每个系统样本上限")
     parser.add_argument("--category", default=None, help="类别过滤")
+    parser.add_argument(
+        "--agent",
+        default="react",
+        choices=("react", "fc"),
+        help="工具调用范式：react 文本协议 / fc 原生 Function Calling",
+    )
     parser.add_argument("--out", default=".cache/eval_online", help="输出目录")
     args = parser.parse_args(argv)
 
@@ -267,6 +275,7 @@ def main(argv: list[str] | None = None) -> int:
         "llm": llm_manifest,
         "limit": args.limit,
         "category": args.category,
+        "agent": args.agent,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "reports": {},
     }

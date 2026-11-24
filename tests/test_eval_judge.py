@@ -136,3 +136,22 @@ def test_constraints_distinguish_negation():
         "故宫周一闭馆；带父母。预算 1500 元。",
         {"budget": 1500, "companions": ["父母"]},
     )["checks"]["companions"]
+
+    # 「如遇周一」「须避开周一」都是条件/规避表达。
+    assert check_itinerary(
+        "D1 故宫（须避开周一）。如遇周一，与D2对调。预算 1500 元。",
+        {"days": 1, "budget": 1500, "must_avoid": ["周一"]},
+    )["checks"]["must_avoid"]
+
+    # 复杂真实输出：多处提及周一但全部是规避/闭馆/条件。
+    assert check_itinerary(
+        "D1必须避开周一；若你出行D1恰逢周一，则D1/D2对调。"
+        "故宫周一闭馆；D1不要排周一。建议选非周一。预算 1500 元。",
+        {"days": 1, "budget": 1500, "must_avoid": ["周一"]},
+    )["checks"]["must_avoid"]
+
+    # 「少爬坡」是约束表达，不是安排了爬坡。
+    assert check_itinerary(
+        "尽量少爬坡；不安排登山。预算 1500 元。",
+        {"budget": 1500, "must_avoid": ["爬坡"]},
+    )["checks"]["must_avoid"]

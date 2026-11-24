@@ -18,6 +18,7 @@ _NEGATIONS = (
     "不建议",
     "不安排",
     "不去",
+    "少",
     "非",
     "免",
     "休息",
@@ -27,7 +28,7 @@ _NEGATIONS = (
 
 _LOCAL_NEGATIONS = ("不", "未", "无", "非", "免", "别", "没")
 
-_CONDITIONALS = ("若", "如果", "恰逢", "万一", "备选", "对调", "改为")
+_CONDITIONALS = ("若", "如果", "如遇", "遇", "逢", "恰逢", "万一", "备选", "对调", "改为")
 
 
 def check_itinerary(
@@ -99,8 +100,37 @@ def _included(text: str, item: str) -> bool:
     return False
 
 
+_WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+_WEEKDAY_NEGATIONS = (
+    "避开",
+    "不",
+    "非",
+    "若",
+    "如遇",
+    "逢",
+    "免",
+    "休息",
+    "闭馆",
+    "除外",
+    "对调",
+)
+_SCHEDULE_VERBS = ("去", "游", "安排", "参观", "行程", "逛", "玩")
+
+
 def _violated(text: str, item: str) -> bool:
     """是否被正向安排：否定、闭馆、避开或条件句都不算违规。"""
+    if item in _WEEKDAYS:
+        for match in re.finditer(item, text):
+            prefix = text[max(0, match.start() - 15) : match.start()]
+            suffix = text[match.end() : match.end() + 8]
+            if any(negation in prefix for negation in _WEEKDAY_NEGATIONS):
+                continue
+            if re.search(r"(D\d|第[一二三四五六七八九十]+天)", prefix) and any(
+                verb in f"{prefix}{suffix}" for verb in _SCHEDULE_VERBS
+            ):
+                return True
+        return False
+
     for index in _occurrences(text, item):
         prefix = text[max(0, index - 10) : index]
         suffix = text[index + len(item) : index + len(item) + 8]
