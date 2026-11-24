@@ -124,7 +124,7 @@ def build_registry() -> ToolRegistry:
     registry.register_tool(
         FunctionTool(
             "get_weather",
-            "查询城市天气（Demo 数据）",
+            "查询城市天气；只在用户明确询问天气时使用。",
             get_weather,
             [ToolParameter("city", "string", "城市", True)],
         )
@@ -132,7 +132,7 @@ def build_registry() -> ToolRegistry:
     registry.register_tool(
         FunctionTool(
             "get_attraction",
-            "查询城市景点（Demo 数据）",
+            "推荐城市景点；只在用户要求景点推荐时使用。",
             get_attraction,
             [ToolParameter("city", "string", "城市", True)],
         )
@@ -140,7 +140,7 @@ def build_registry() -> ToolRegistry:
     registry.register_tool(
         FunctionTool(
             "search_notes",
-            "检索旅行笔记",
+            "检索旅行笔记中的事实（开放时间、闭馆、预约、最佳时间等）；用户问具体事实时使用。",
             search_notes,
             [ToolParameter("query", "string", "检索词", True)],
         )

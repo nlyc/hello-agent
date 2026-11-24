@@ -77,6 +77,27 @@ def test_evaluate_irrelevance():
     assert result["false_positive"] is True
 
 
+def test_loose_text_matching_for_free_text_fields():
+    expected = ToolCall.from_text('search_notes(query="故宫闭馆")')
+    actual = ToolCall.from_text('search_notes(query="故宫 周一 闭馆")')
+    assert not calls_equal(expected, actual)
+    assert calls_equal(expected, actual, loose_fields=["query"])
+    assert not calls_equal(
+        ToolCall.from_text('search_notes(query="上海外滩")'),
+        actual,
+        loose_fields=["query"],
+    )
+
+
+def test_evaluate_tool_calls_with_loose_fields():
+    expected = [ToolCall.from_text('search_notes(query="故宫闭馆")')]
+    actual = [ToolCall.from_text('search_notes(query="故宫 周一 闭馆")')]
+    assert not evaluate_tool_calls(expected, actual)["passed"]
+    assert evaluate_tool_calls(
+        expected, actual, loose_fields=["query"]
+    )["passed"]
+
+
 class FakeAgent:
     tracer = None
 
@@ -117,17 +138,28 @@ def test_tool_calling_evaluator_uses_trace_and_aggregates():
             question="上海天气",
             ground_truth=[{"name": "get_weather", "arguments": {"city": "上海"}}],
         ),
+        EvalCase(
+            id="c4",
+            suite="tool_calling",
+            category="simple",
+            question="故宫闭馆吗",
+            ground_truth=[{"name": "search_notes", "arguments": {"query": "故宫闭馆"}}],
+            metadata={"loose_fields": ["query"]},
+        ),
     ]
     agent = FakeAgent(
         {
             "北京天气": ['get_weather(city="北京")'],
             "上海天气": ['get_weather(city="杭州")'],
+            "故宫闭馆吗": ['search_notes(query="故宫 周一 闭馆")'],
         }
     )
     report = ToolCallingEvaluator(agent).run(cases, system="fake")
-    assert report.metrics["cases"] == 3
-    assert report.metrics["passed"] == 2  # c1 + irrelevance
-    assert report.metrics["by_category"]["simple"]["passed"] == 1
+    assert report.metrics["cases"] == 4
+    assert report.metrics["passed"] == 3  # c1 + irrelevance + loose c4
+    assert report.metrics["by_category"]["simple"]["passed"] == 2
     assert report.metrics["by_category"]["irrelevance"]["passed"] == 1
     assert report.cases[0].passed
     assert not report.cases[2].passed
+    assert report.cases[3].passed
+    assert report.cases[3].metrics["loose_fields"] == ["query"]

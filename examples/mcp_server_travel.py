@@ -34,17 +34,17 @@ _NOTES = (
 
 
 def get_weather(city: str) -> str:
-    """查询城市天气（Demo 固定数据）。"""
+    """查询城市天气；只在用户明确询问天气时使用。"""
     return _WEATHER.get(str(city).strip(), f"暂未收录 {city} 的天气。")
 
 
 def get_attraction(city: str) -> str:
-    """查询城市景点建议（Demo 固定数据）。"""
+    """推荐城市景点；只在用户要求景点推荐时使用。"""
     return _ATTRACTIONS.get(str(city).strip(), f"暂未收录 {city} 的景点。")
 
 
 def search_notes(query: str) -> str:
-    """检索旅行笔记（关键词匹配）。"""
+    """检索旅行笔记中的事实（开放时间、闭馆、预约、最佳时间等）；用户问具体事实时使用。"""
     text = str(query).strip()
     if not text:
         return "检索词不能为空。"

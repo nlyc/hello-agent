@@ -25,6 +25,7 @@ class EvalCase:
         metadata.setdefault("gold_chunk_ids", list(data.get("gold_chunk_ids", []) or []))
         metadata.setdefault("city", str(data.get("city", "") or ""))
         metadata.setdefault("tags", list(data.get("tags", []) or []))
+        metadata.setdefault("loose_fields", list(data.get("loose_fields", []) or []))
         ground_truth = data.get("ground_truth")
         if ground_truth is None:
             ground_truth = data.get("gold_answer")

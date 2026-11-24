@@ -77,12 +77,15 @@ class ToolCallingEvaluator:
                     error = f"{type(exc).__name__}: {exc}"
                 latency = (time.perf_counter() - started) * 1000
                 expected = _expected_calls(case)
+                loose_fields = list(case.metadata.get("loose_fields", []) or [])
                 metrics = evaluate_tool_calls(
                     expected,
                     self.collector.calls,
                     category=case.category,
+                    loose_fields=loose_fields,
                 )
                 metrics["category"] = case.category
+                metrics["loose_fields"] = loose_fields
                 metrics["expected"] = [call.to_dict() for call in expected]
                 metrics["actual"] = [
                     call.to_dict() for call in self.collector.calls

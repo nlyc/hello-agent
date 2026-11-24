@@ -5,10 +5,21 @@ from __future__ import annotations
 import ast
 import json
 import operator
+import re
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
 from agentflow.core.exceptions import EvaluationError
+from agentflow.retrieval.embedder import tokenize
+
+DEFAULT_LOOSE_FIELDS: tuple[str, ...] = (
+    "query",
+    "text",
+    "keyword",
+    "keywords",
+    "search",
+    "prompt",
+)
 
 _BINOPS = {
     ast.Add: operator.add,
@@ -130,36 +141,75 @@ def safe_eval(node: ast.AST) -> Any:
     raise EvaluationError(f"不安全的表达式节点：{type(node).__name__}")
 
 
-def values_equal(left: Any, right: Any) -> bool:
-    """参数值语义等价：2+3 ≡ 5、'x' ≡ "x"、bool 不与数字混同。"""
+def values_equal(left: Any, right: Any, *, loose: bool = False) -> bool:
+    """参数值语义等价：2+3 ≡ 5、'x' ≡ "x"、bool 不与数字混同。
+
+    ``loose=True`` 时对字符串启用“关键 token 包含/重叠”判定，用于
+    ``search_notes.query`` 这类自由文本参数。
+    """
     if isinstance(left, bool) or isinstance(right, bool):
         return isinstance(left, bool) and isinstance(right, bool) and left == right
     if isinstance(left, (int, float)) and isinstance(right, (int, float)):
         return abs(float(left) - float(right)) <= 1e-9
     if isinstance(left, (list, tuple)) and isinstance(right, (list, tuple)):
         return len(left) == len(right) and all(
-            values_equal(a, b) for a, b in zip(left, right)
+            values_equal(a, b, loose=loose) for a, b in zip(left, right)
         )
     if isinstance(left, dict) and isinstance(right, dict):
         return set(left) == set(right) and all(
-            values_equal(left[key], right[key]) for key in left
+            values_equal(left[key], right[key], loose=loose) for key in left
         )
     if isinstance(left, str) and isinstance(right, str):
+        if loose:
+            return loose_text_equal(left, right)
         return left.strip() == right.strip()
     return left == right
 
 
-def calls_equal(expected: ToolCall, actual: ToolCall) -> bool:
+def _normalized_text(text: str) -> str:
+    """去空白与标点，保留 CJK / 字母数字。"""
+    return re.sub(r"[^\w一-鿿]+", "", str(text or "").lower())
+
+
+def loose_text_equal(expected: str, actual: str) -> bool:
+    """自由文本参数：归一化后包含，或关键 token 召回 >= 0.5。
+
+    例：「故宫闭馆」与「故宫 周一 闭馆」视为等价；
+    「故宫」与「上海外滩」不等价。
+    """
+    left = _normalized_text(expected)
+    right = _normalized_text(actual)
+    if not left or not right:
+        return left == right
+    if left in right or right in left:
+        return True
+    expected_terms = set(tokenize(left)) or {left}
+    actual_terms = set(tokenize(right)) or {right}
+    overlap = len(expected_terms & actual_terms)
+    recall = overlap / len(expected_terms) if expected_terms else 0.0
+    precision = overlap / len(actual_terms) if actual_terms else 0.0
+    return recall >= 0.5 and precision >= 0.2
+
+
+def calls_equal(
+    expected: ToolCall,
+    actual: ToolCall,
+    *,
+    loose_fields: Sequence[str] = (),
+) -> bool:
     """函数名精确一致 + 参数集合无序 + 值语义等价。"""
     if expected.name != actual.name:
         return False
     if set(expected.arguments) != set(actual.arguments):
         return False
-    if not all(
-        values_equal(expected.arguments[key], actual.arguments[key])
-        for key in expected.arguments
-    ):
-        return False
+    loose = {str(field) for field in loose_fields}
+    for key in expected.arguments:
+        if not values_equal(
+            expected.arguments[key],
+            actual.arguments[key],
+            loose=key in loose,
+        ):
+            return False
     return all(
         values_equal(a, b) for a, b in zip(expected.positional, actual.positional)
     ) and len(expected.positional) == len(actual.positional)
@@ -168,13 +218,15 @@ def calls_equal(expected: ToolCall, actual: ToolCall) -> bool:
 def match_calls(
     expected: Sequence[ToolCall],
     actual: Sequence[ToolCall],
+    *,
+    loose_fields: Sequence[str] = (),
 ) -> dict[str, Any]:
     """多重集合匹配；返回是否完全一致与匹配数。"""
     remaining = list(actual)
     matched = 0
     for item in expected:
         for index, candidate in enumerate(remaining):
-            if calls_equal(item, candidate):
+            if calls_equal(item, candidate, loose_fields=loose_fields):
                 remaining.pop(index)
                 matched += 1
                 break
@@ -196,6 +248,7 @@ def evaluate_tool_calls(
     actual: Sequence[ToolCall],
     *,
     category: str = "",
+    loose_fields: Sequence[str] = (),
 ) -> dict[str, Any]:
     """按类别评估：irrelevance 看是否克制，其余看调用集合是否一致。"""
     if category == "irrelevance":
@@ -208,7 +261,7 @@ def evaluate_tool_calls(
             "matched": 0,
             "false_positive": not passed,
         }
-    result = match_calls(expected, actual)
+    result = match_calls(expected, actual, loose_fields=loose_fields)
     result["passed"] = bool(result["exact_match"])
     result["false_positive"] = bool(
         category == "irrelevance" and actual
