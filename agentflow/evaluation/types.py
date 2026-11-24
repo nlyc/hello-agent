@@ -20,14 +20,22 @@ class EvalCase:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], *, suite: str, index: int) -> "EvalCase":
+        metadata = dict(data.get("metadata", {}) or {})
+        # 兼容 M8 的 travel_qa.jsonl 字段（gold_answer / gold_chunk_ids / city）。
+        metadata.setdefault("gold_chunk_ids", list(data.get("gold_chunk_ids", []) or []))
+        metadata.setdefault("city", str(data.get("city", "") or ""))
+        metadata.setdefault("tags", list(data.get("tags", []) or []))
+        ground_truth = data.get("ground_truth")
+        if ground_truth is None:
+            ground_truth = data.get("gold_answer")
         return cls(
             id=str(data.get("id") or f"{suite}_{index:03d}"),
             suite=suite,
             category=str(data.get("category", "") or ""),
             question=str(data.get("question", "") or ""),
             payload=dict(data.get("payload", {}) or {}),
-            ground_truth=data.get("ground_truth"),
-            metadata=dict(data.get("metadata", {}) or {}),
+            ground_truth=ground_truth,
+            metadata=metadata,
         )
 
     def to_dict(self) -> dict[str, Any]:

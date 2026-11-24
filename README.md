@@ -61,6 +61,9 @@ py -3.14 -m examples.demo_a2a_travel --out .cache/a2a_demo
 # v2.0：评估基准（默认诚实负基线；在线系统需 LLM_API_KEY）
 py -3.14 scripts/eval_v2.py --suite all --limit 5
 
+# v2.0：在线对比 S0（v1.1）vs S1（ContextBuilder）；默认 limit=3 控制成本
+py -3.14 scripts/eval_online_v2.py --suites all --limit 3 --out .cache/eval_online_full
+
 # 架构图 PNG（交付物 D2）
 py -3.14 scripts/render_architecture.py
 

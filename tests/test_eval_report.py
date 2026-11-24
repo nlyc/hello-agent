@@ -38,6 +38,10 @@ def test_dataset_load_and_filter():
     assert all(case.category == "simple" for case in simple)
     assert len(dataset.filtered(limit=3)) == 3
 
+    qa = EvalDataset.load(ROOT / "data/eval/travel_qa.jsonl", name="qa")
+    assert qa.cases[0].ground_truth == "周一闭馆"
+    assert qa.cases[0].metadata["city"] == "北京"
+
 
 def test_report_render_and_write(tmp_path):
     report = EvalReport(

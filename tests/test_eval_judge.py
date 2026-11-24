@@ -99,3 +99,34 @@ def test_constraints_checker():
     assert failed["passed"] is False
     assert failed["checks"]["days"] is False
     assert failed["checks"]["budget"] is False
+
+
+def test_constraints_distinguish_negation():
+    # 「不安排故宫」不能被判为包含故宫。
+    assert not check_itinerary(
+        "不安排故宫、景山等走路多的项目。D1 天坛；D2 颐和园。预算 1500 元。",
+        {"days": 2, "budget": 1500, "must_include": ["故宫"]},
+    )["checks"]["must_include"]
+
+    # 「避开周一」「周一闭馆」是合规表达。
+    assert check_itinerary(
+        "避开周一，故宫周一闭馆。D1 天坛；D2 颐和园。预算 1500 元。",
+        {"days": 2, "budget": 1500, "must_avoid": ["周一"]},
+    )["checks"]["must_avoid"]
+
+    # 真的安排在周一才违规。
+    assert not check_itinerary(
+        "D1 周一去故宫；D2 颐和园。预算 1500 元。",
+        {"days": 2, "budget": 1500, "must_avoid": ["周一"]},
+    )["checks"]["must_avoid"]
+
+    assert check_itinerary(
+        "东宫门一线平缓，不爬坡。预算 1500 元。",
+        {"budget": 1500, "must_avoid": ["爬坡"]},
+    )["checks"]["must_avoid"]
+
+    # 条件句「若恰逢周一…确保不在周一」不算违规。
+    assert check_itinerary(
+        "D1 故宫（避开周一）。若D1恰逢周一，与D2对调，确保故宫不在周一参观。预算 1500 元。",
+        {"days": 1, "budget": 1500, "must_avoid": ["周一"]},
+    )["checks"]["must_avoid"]

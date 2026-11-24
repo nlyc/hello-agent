@@ -7,16 +7,47 @@ from typing import Any, Sequence
 
 _ARTICLES = re.compile(r"\b(a|an|the)\b", re.IGNORECASE)
 _PUNCT = re.compile(r"[.,;:!?，。；：！？、]+$")
+_MARKDOWN = re.compile(r"[*_`~]+")
 _CURRENCY = re.compile(r"[¥$€£]")
 _UNITS = re.compile(
-    r"(人民币|美元|元|公里|千米|kg|千克|米|小时|分钟|分钟|分钟|h|min|%)\s*$",
+    r"(人民币|美元|元|公里|千米|kg|千克|米|小时|分钟|h|min|%)\s*$",
     re.IGNORECASE,
 )
 _NUMBER = re.compile(r"^[+-]?\d+(?:\.\d+)?$")
+_CN_NUMBER = re.compile(r"[零一二两三四五六七八九十]{1,3}(?=[点时号日天])")
+_CN_DIGITS = {
+    "零": 0,
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+}
+
+
+def _cn_to_int(text: str) -> int | None:
+    """把 ``七`` / ``十七`` / ``二十`` 等简单中文数字转成整数。"""
+    if not text:
+        return None
+    if text == "十":
+        return 10
+    if text.startswith("十") and len(text) == 2:
+        return 10 + _CN_DIGITS.get(text[1], 0)
+    if "十" in text:
+        left, _, right = text.partition("十")
+        tens = _CN_DIGITS.get(left, 1) if left else 1
+        ones = _CN_DIGITS.get(right, 0) if right else 0
+        return tens * 10 + ones
+    return _CN_DIGITS.get(text)
 
 
 def extract_final_answer(text: str) -> str:
-    """按 GAIA 纪律提取答案：FINAL ANSWER → 答案: → 最后一个非空行。"""
+    """按 GAIA 纪律提取答案：FINAL ANSWER → 答案: → 去掉引用块的正文。"""
     source = str(text or "").strip()
     if not source:
         return ""
@@ -28,6 +59,10 @@ def extract_final_answer(text: str) -> str:
         match = re.search(pattern, source, re.IGNORECASE | re.DOTALL)
         if match:
             return match.group(1).strip().splitlines()[0].strip()
+    # RAG 回答常在末尾追加「依据：…」；它不是答案，先剥离。
+    citation = re.search(r"\n\s*(?:依据|参考来源|参考引用)\s*[:：]", source)
+    if citation:
+        source = source[: citation.start()].strip()
     lines = [line.strip() for line in source.splitlines() if line.strip()]
     return lines[-1] if lines else ""
 
@@ -47,9 +82,13 @@ def as_number(value: Any) -> float | None:
 
 
 def normalize_string(text: Any) -> str:
-    """小写、去冠词、去末尾标点、压缩空白。"""
+    """小写、去 Markdown、去冠词、中文时间数字转阿拉伯、压缩空白。"""
     value = str(text or "").strip().lower()
+    value = _MARKDOWN.sub("", value)
     value = _ARTICLES.sub(" ", value)
+    value = _CN_NUMBER.sub(
+        lambda match: str(_cn_to_int(match.group(0)) or match.group(0)), value
+    )
     value = _PUNCT.sub("", value)
     return " ".join(value.split())
 
