@@ -3,6 +3,7 @@
 from agentflow.core.agent import Agent
 from agentflow.core.config import AgentConfig, Config, LLMConfig
 from agentflow.core.exceptions import (
+    A2AError,
     AgentError,
     AgentFlowError,
     ConfigError,
@@ -16,6 +17,7 @@ from agentflow.core.exceptions import (
 from agentflow.core.message import Message, MessageRole
 
 __all__ = [
+    "A2AError",
     "Agent",
     "AgentConfig",
     "AgentError",

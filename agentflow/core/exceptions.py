@@ -67,3 +67,7 @@ class NoteError(AgentFlowError):
 
 class MCPError(AgentFlowError):
     """MCP 协议错误（连接、超时、JSON-RPC 错误、工具调用失败等）。"""
+
+
+class A2AError(AgentFlowError):
+    """A2A 协议错误（发现、鉴权、任务生命周期、超时等）。"""
