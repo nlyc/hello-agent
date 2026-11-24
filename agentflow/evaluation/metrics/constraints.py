@@ -25,6 +25,8 @@ _NEGATIONS = (
     "除外",
 )
 
+_LOCAL_NEGATIONS = ("不", "未", "无", "非", "免", "别", "没")
+
 _CONDITIONALS = ("若", "如果", "恰逢", "万一", "备选", "对调", "改为")
 
 
@@ -89,10 +91,10 @@ def _occurrences(text: str, item: str):
 
 
 def _included(text: str, item: str) -> bool:
-    """是否被正向提及：前缀不得出现否定词。"""
+    """是否被正向提及：只看紧邻的局部否定词，避免跨句误伤。"""
     for index in _occurrences(text, item):
-        prefix = text[max(0, index - 10) : index]
-        if not any(negation in prefix for negation in _NEGATIONS):
+        prefix = text[max(0, index - 4) : index]
+        if not any(negation in prefix for negation in _LOCAL_NEGATIONS):
             return True
     return False
 

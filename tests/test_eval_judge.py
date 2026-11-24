@@ -130,3 +130,9 @@ def test_constraints_distinguish_negation():
         "D1 故宫（避开周一）。若D1恰逢周一，与D2对调，确保故宫不在周一参观。预算 1500 元。",
         {"days": 1, "budget": 1500, "must_avoid": ["周一"]},
     )["checks"]["must_avoid"]
+
+    # 上一句的「闭馆」不应把下一句的「带父母」误判为否定。
+    assert check_itinerary(
+        "故宫周一闭馆；带父母。预算 1500 元。",
+        {"budget": 1500, "companions": ["父母"]},
+    )["checks"]["companions"]
