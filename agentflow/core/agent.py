@@ -12,9 +12,15 @@ if TYPE_CHECKING:  # pragma: no cover - 仅用于类型标注
 
 
 def memory_text(memory_context: "MemoryContext | None") -> str:
-    """提取记忆上下文中的文本；为空或不存在时返回空串。"""
+    """提取上下文中的可注入文本；为空或不存在时返回空串。
+
+    优先使用 ``prompt_text``（BuiltContext 去掉了 Task 分区，避免与
+    Agent 自己的输入重复）；旧 ``MemoryContext`` 回落到 ``text``。
+    """
     if memory_context is None:
         return ""
+    if hasattr(memory_context, "prompt_text"):
+        return str(getattr(memory_context, "prompt_text", "") or "").strip()
     return str(getattr(memory_context, "text", "") or "").strip()
 
 
@@ -41,6 +47,7 @@ class Agent(ABC):
         memory=None,
         tracer=None,
         memory_enabled: Optional[bool] = None,
+        context_builder=None,
     ):
         self.name = name
         self.llm = llm
@@ -49,6 +56,7 @@ class Agent(ABC):
         self.memory = memory
         self.tracer = tracer
         self._memory_enabled_override = memory_enabled
+        self.context_builder = context_builder
         self._history: list[Message] = []
 
     @property
@@ -59,11 +67,12 @@ class Agent(ABC):
         return bool(getattr(self.config.memory, "enabled", True))
 
     def run(self, input_text: str, **kwargs) -> str:
-        """模板方法：构建记忆 → 子类执行范式循环 → 写回记忆并记录助手消息。"""
+        """模板方法：构建上下文 → 子类执行范式循环 → 写回记忆并记录助手消息。"""
         self._emit("start", data={"input": input_text})
         self._history.append(Message(role="user", content=input_text))
-        memory_context = self._prepare_memory_context(input_text)
-        kwargs["memory_context"] = memory_context
+        context = self._prepare_context(input_text)
+        kwargs["memory_context"] = context
+        kwargs["context"] = context
         try:
             result = self._execute(input_text, **kwargs)
         except Exception as e:
@@ -73,6 +82,40 @@ class Agent(ABC):
         self._write_memory(input_text, result)
         self._emit("end", data={"result": result})
         return result
+
+    def _prepare_context(self, input_text: str):
+        """优先构建 v2.0 上下文；未注入 builder 时保持 v1.0 记忆路径。"""
+        if self.context_builder is None:
+            return self._prepare_memory_context(input_text)
+        from agentflow.memory.context import MemoryContext
+
+        try:
+            # 当前用户消息已追加到 _history，避免上下文里再重复一次。
+            context = self.context_builder.build(
+                input_text, history=self._history[:-1]
+            )
+        except Exception as exc:
+            self._emit("context.error", data={"error": str(exc), "phase": "build"})
+            return MemoryContext(enabled=False)
+        if context is None:
+            self._emit("context.error", data={"error": "builder 返回空", "phase": "build"})
+            return MemoryContext(enabled=False)
+        stats = dict(getattr(context, "stats", {}) or {})
+        self._emit(
+            "context.build",
+            data={
+                "provider": type(self.context_builder).__name__,
+                "tokens": stats.get("total_tokens"),
+                "sections": stats.get("sections"),
+                "packets_selected": stats.get("packets_selected"),
+                "packets_dropped_relevance": stats.get(
+                    "packets_dropped_relevance"
+                ),
+                "packets_dropped_budget": stats.get("packets_dropped_budget"),
+                "source_errors": stats.get("source_errors"),
+            },
+        )
+        return context
 
     def _prepare_memory_context(self, input_text: str) -> "MemoryContext":
         """构建本轮记忆上下文；失败时发 trace 并降级为空上下文。"""

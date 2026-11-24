@@ -73,7 +73,8 @@ def test_section_template_rejects_unknown_section():
 def test_built_context_duck_types_memory_context():
     packet = ContextPacket(content="带父母，少走路", source="memory", section="context")
     built = BuiltContext(
-        text="【上下文】带父母，少走路",
+        text="# Role & Policies\n系统\n\n# Task\n当前问题\n\n# Context\n带父母，少走路",
+        prompt_text="# Role & Policies\n系统\n\n# Context\n带父母，少走路",
         sections={"context": "带父母，少走路"},
         packets=[packet],
         stats={"max_tokens": 3000},
@@ -82,6 +83,7 @@ def test_built_context_duck_types_memory_context():
     assert built.section("context") == "带父母，少走路"
     assert built.items[0]["content"] == "带父母，少走路"
     assert built.to_dict()["packets"][0]["source"] == "memory"
-    # 与 v1.0 的 memory_text 兼容：只要暴露 .text 即可。
-    assert memory_text(built) == built.text
+    # Agent 注入用 prompt_text（不含 Task，避免与自身输入重复）。
+    assert memory_text(built) == built.prompt_text
+    assert "# Task" not in memory_text(built)
     assert set(SECTIONS) == {"role", "task", "state", "evidence", "context", "output"}

@@ -74,7 +74,13 @@ def _parse_tool_call(action_str: str) -> tuple[Optional[str], dict]:
 
 
 def _memory_items_message(memory_context) -> str:
-    """把召回条目拼成一条额外 user 消息；无条目时返回空串。"""
+    """把召回条目拼成一条额外 user 消息；无条目时返回空串。
+
+    ``BuiltContext`` 的 ``text`` 已包含全部条目，再插一条会重复，
+    因此直接跳过。
+    """
+    if getattr(memory_context, "kind", "") == "built":
+        return ""
     items = getattr(memory_context, "items", None) or []
     lines: list[str] = []
     for entry in items:
@@ -103,9 +109,17 @@ class ReActAgent(Agent):
         memory=None,
         tracer=None,
         memory_enabled: Optional[bool] = None,
+        context_builder=None,
     ):
         super().__init__(
-            name, llm, system_prompt, config, memory, tracer, memory_enabled
+            name,
+            llm,
+            system_prompt,
+            config,
+            memory,
+            tracer,
+            memory_enabled,
+            context_builder=context_builder,
         )
         self.tools = tools
         self.custom_prompt = custom_prompt

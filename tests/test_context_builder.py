@@ -56,6 +56,9 @@ def test_builder_includes_role_task_output():
     assert built.stats["packets_selected"] == 3
     assert built.stats["packets_gathered"] == 3
     assert built.sections["task"] == "北京两日游"
+    assert "# Task" in built.text
+    assert "# Task" not in built.prompt_text
+    assert "你是旅行助手" in built.prompt_text
 
 
 def test_builder_ranks_by_relevance_and_filters():

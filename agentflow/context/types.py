@@ -160,6 +160,27 @@ class ContextConfig(BaseModel):
         """按比例计算给系统指令预留的 token 数（用于统计）。"""
         return int(self.max_tokens * self.reserve_ratio)
 
+    @classmethod
+    def from_env(cls) -> "ContextConfig":
+        """从 ``.env`` / 环境变量读取上下文配置。"""
+        from agentflow.core.env import env_float, env_int
+
+        return cls(
+            max_tokens=env_int("CONTEXT_MAX_TOKENS", 3000),
+            reserve_ratio=env_float("CONTEXT_RESERVE_RATIO", 0.2),
+            min_relevance=env_float("CONTEXT_MIN_RELEVANCE", 0.1),
+            relevance_weight=env_float("CONTEXT_RELEVANCE_WEIGHT", 0.7),
+            recency_weight=env_float("CONTEXT_RECENCY_WEIGHT", 0.3),
+            recent_history=env_int("CONTEXT_RECENT_HISTORY", 5),
+            memory_limit=env_int("CONTEXT_MEMORY_LIMIT", 10),
+            rag_limit=env_int("CONTEXT_RAG_LIMIT", 5),
+            note_limit=env_int("CONTEXT_NOTE_LIMIT", 10),
+            recency_half_life_hours=env_float(
+                "CONTEXT_RECENCY_HALF_LIFE_HOURS", 72.0
+            ),
+            min_section_tokens=env_int("CONTEXT_MIN_SECTION_TOKENS", 50),
+        )
+
 
 @dataclass(frozen=True)
 class SectionTemplate:
@@ -203,6 +224,9 @@ class BuiltContext:
     stats: dict[str, Any] = field(default_factory=dict)
     task: str = ""
     enabled: bool = True
+    # 供 Agent 注入：不含 Task 分区，避免与 Agent 自己的输入重复。
+    prompt_text: str = ""
+    kind: str = "built"
 
     @property
     def items(self) -> list[dict[str, Any]]:
@@ -231,6 +255,8 @@ class BuiltContext:
             "stats": dict(self.stats),
             "task": self.task,
             "enabled": self.enabled,
+            "prompt_text": self.prompt_text,
+            "kind": self.kind,
         }
 
     def __bool__(self) -> bool:

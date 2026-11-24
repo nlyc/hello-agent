@@ -55,9 +55,17 @@ class ReflectionAgent(Agent):
         memory=None,
         tracer=None,
         memory_enabled: Optional[bool] = None,
+        context_builder=None,
     ):
         super().__init__(
-            name, llm, system_prompt, config, memory, tracer, memory_enabled
+            name,
+            llm,
+            system_prompt,
+            config,
+            memory,
+            tracer,
+            memory_enabled,
+            context_builder=context_builder,
         )
         self.max_iterations = max_iterations
         self.role = role

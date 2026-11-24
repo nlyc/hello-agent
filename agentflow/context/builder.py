@@ -133,6 +133,8 @@ class ContextBuilder:
                 headers=self.template.headers,
             )
             text = self.template.render(sections)
+        # Agent 自己会追加当前问题，因此注入用文本去掉 Task 分区，避免重复。
+        prompt_text = self.template.render({**sections, "task": ""})
 
         packets = [
             packet
@@ -169,6 +171,7 @@ class ContextBuilder:
             stats=stats,
             task=task_text,
             enabled=True,
+            prompt_text=prompt_text,
         )
 
     def _always_packets(
