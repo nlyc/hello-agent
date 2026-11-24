@@ -55,3 +55,7 @@ class DocumentLoadError(RAGError):
 
 class MemoryError(AgentFlowError):
     """记忆层读写失败。"""
+
+
+class ContextError(AgentFlowError):
+    """上下文管线构建失败（配置非法、分区非法、预算无法满足等）。"""
