@@ -59,3 +59,7 @@ class MemoryError(AgentFlowError):
 
 class ContextError(AgentFlowError):
     """上下文管线构建失败（配置非法、分区非法、预算无法满足等）。"""
+
+
+class NoteError(AgentFlowError):
+    """笔记读写失败（ID 非法、文件损坏、类型非法等）。"""

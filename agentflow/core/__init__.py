@@ -8,6 +8,7 @@ from agentflow.core.exceptions import (
     ConfigError,
     ContextError,
     LLMError,
+    NoteError,
     ToolError,
     WorkflowError,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "LLMError",
     "Message",
     "MessageRole",
+    "NoteError",
     "ToolError",
     "WorkflowError",
 ]
