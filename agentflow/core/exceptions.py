@@ -63,3 +63,7 @@ class ContextError(AgentFlowError):
 
 class NoteError(AgentFlowError):
     """笔记读写失败（ID 非法、文件损坏、类型非法等）。"""
+
+
+class MCPError(AgentFlowError):
+    """MCP 协议错误（连接、超时、JSON-RPC 错误、工具调用失败等）。"""
