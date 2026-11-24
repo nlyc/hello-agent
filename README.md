@@ -1,7 +1,11 @@
-# agentflow · 自研智能体框架 v1.0
+# agentflow · 自研智能体框架 v2.0
 
 统一承载三种 Agent 范式（ReAct / Reflection / Plan-and-Solve）、低代码工作流、可替换 Model Layer，
 并提供**工具热插拔、Context/Memory 管理、全链路 Trace 回调**三大新能力。
+
+v2.0 在 v1.0 与 M8 记忆/RAG 之上新增：
+**上下文管线**（ContextBuilder + NoteTool + TerminalTool）、**MCP / A2A 协议接入**、**评估基准与对比报告**。
+需求见 [docs/v2.0-requirements.md](docs/v2.0-requirements.md)，评估见 [docs/v2.0-eval-report.md](docs/v2.0-eval-report.md)。
 
 需求规划见仓库父目录 `自研框架v1.0-需求规划.md`；本仓库为落地实现。
 
@@ -15,6 +19,10 @@
 | `agents` | ReActAgent / ReflectionAgent / PlanAndSolveAgent（均支持自动注入记忆上下文） |
 | `memory` | 工作记忆（窗口+TTL）/ 长期记忆（SQLite 向量库）/ MemoryManager / Context/Memory 管理 |
 | `retrieval` | 文档加载（txt/md/pdf/docx/URL）/ 标题感知分块 / Embedder / BM25 / SQLite·Qdrant / RRF 混合检索 / RAGPipeline |
+| `context` | 上下文管线：GSSC / 六分区 / ContextPacket / Memory·RAG·History Source / 预算压缩 |
+| `notes` | 项目式笔记：Markdown + YAML front matter / notes_index.json / 五类型 / NoteContextSource |
+| `protocols` | MCP（JSON-RPC over stdio + MCPTool 自动展开）/ A2A（AgentCard/Task/Artifact + A2ATool） |
+| `evaluation` | 数据集 / AST 工具调用 / QEM / LLM Judge / Win Rate / 报告与 EvaluationTool |
 | `trace` | 全链路 Trace 回调（TraceEvent / Tracer / 订阅） |
 | `workflow` | 低代码工作流（自研轻量 StateGraph，不依赖 LangGraph） |
 | `utils` | helpers / logging / serialization |
@@ -40,6 +48,18 @@ py -3.14 -m examples.web_app --port 8080 --no-browser
 
 # 三范式轨迹对比（生成 JSONL + 对比表，驱动 D6 报告）
 py -3.14 scripts/gen_trajectory_report.py
+
+# v2.0：上下文工程 Demo（Terminal → Note → ContextBuilder，离线，48% token 节省）
+py -3.14 -m examples.demo_context_engineering --out .cache/context_demo
+
+# v2.0：MCP 发现 → 展开 → 注册 → Agent 调用（离线）
+py -3.14 -m examples.demo_mcp_travel
+
+# v2.0：A2A 三 Agent 协作（离线）
+py -3.14 -m examples.demo_a2a_travel --out .cache/a2a_demo
+
+# v2.0：评估基准（默认诚实负基线；在线系统需 LLM_API_KEY）
+py -3.14 scripts/eval_v2.py --suite all --limit 5
 
 # 架构图 PNG（交付物 D2）
 py -3.14 scripts/render_architecture.py
@@ -67,6 +87,12 @@ Copy-Item .env.example .env    # 然后按需填写
 | 向量库 | `VECTOR_STORE`（`sqlite`/`qdrant`）/ `RAG_SQLITE_PATH` / `QDRANT_URL` / `QDRANT_API_KEY` / `QDRANT_COLLECTION` / `QDRANT_TIMEOUT` / `QDRANT_PREFER_GRPC` |
 | 记忆 | `MEMORY_ENABLED` / `MEMORY_SQLITE_PATH` / `MEMORY_TOP_K` / `USER_ID` |
 | Agent | `AGENT_MAX_STEPS` / `AGENT_MAX_TOOL_ITERATIONS` / `MAX_HISTORY_LENGTH` / `DEBUG` |
+| 上下文 | `CONTEXT_MAX_TOKENS` / `CONTEXT_RESERVE_RATIO` / `CONTEXT_RELEVANCE_WEIGHT` / `CONTEXT_RECENCY_WEIGHT` / `CONTEXT_RECENT_HISTORY` / `CONTEXT_RECENCY_HALF_LIFE_HOURS` |
+| 笔记 | `NOTES_DIR` / `USER_ID`（笔记按用户隔离，默认 `.data/notes/<user>/`） |
+| 终端 | `TERMINAL_WORKSPACE`（默认沙箱由调用方显式传入；`allowed_commands` / 超时 / 截断可构造传参） |
+| MCP | server 命令由 `MCPTool(command=[...])` 显式传入；连接/调用超时可构造传参 |
+| A2A | 默认 `127.0.0.1:0`；`A2A_TOKEN` / 超时 / 1MB 上限可构造传参 |
+| 评估 | 数据集默认 `data/eval/`；`EVAL_JUDGE_MODEL` / `EVAL_TEMPERATURE` 只影响在线 Judge |
 
 `.env` 已被 `.gitignore` 忽略，不会提交；`.env.example` 只保留占位值。
 Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后端与向量库并自动重建索引，
@@ -107,6 +133,12 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 | D6 | 三范式轨迹对比报告 | [`docs/trajectory-comparison.md`](docs/trajectory-comparison.md) |
 | D7 | M8 记忆 + RAG 演示 | [`examples/demo_travel_memory_rag.py`](examples/demo_travel_memory_rag.py) |
 | D8 | M8 召回与回答评估报告 | [`docs/m8-memory-rag-eval.md`](docs/m8-memory-rag-eval.md) |
+| D9 | 上下文管线（ContextBuilder + NoteTool + TerminalTool） | [`agentflow/context/`](agentflow/context/) · [`agentflow/notes/`](agentflow/notes/) · [`agentflow/tools/terminal_tool.py`](agentflow/tools/terminal_tool.py) · [`examples/demo_context_engineering.py`](examples/demo_context_engineering.py) |
+| D10 | MCP 接入与自建旅行 server | [`agentflow/protocols/mcp/`](agentflow/protocols/mcp/) · [`examples/mcp_server_travel.py`](examples/mcp_server_travel.py) · [`examples/demo_mcp_travel.py`](examples/demo_mcp_travel.py) |
+| D11 | A2A 协作 Demo | [`agentflow/protocols/a2a/`](agentflow/protocols/a2a/) · [`examples/demo_a2a_travel.py`](examples/demo_a2a_travel.py) |
+| D12 | 评估基准集与评估工具 | [`agentflow/evaluation/`](agentflow/evaluation/) · [`scripts/eval_v2.py`](scripts/eval_v2.py) · [`data/eval/`](data/eval/) |
+| D13 | v2.0 对比评估报告 | [`docs/v2.0-eval-report.md`](docs/v2.0-eval-report.md) |
+| D14 | v2.0 交付检查 | [`docs/v2.0-delivery-check.md`](docs/v2.0-delivery-check.md) |
 
 ## 里程碑
 
@@ -133,3 +165,13 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 - [x] M8.13 全在线演示：移除离线回答与固定 Demo 章节；未收录景点启发式识别并联网兜底
 - [x] M8.14 三范式真实数据修正：天气改用观测接口、记忆对照读取真实长期记忆（只读）
 - [x] M8.15 三范式 / 完整 Demo 完成提示音（`878253__qvantor__ui-pop-up-open.wav`）
+- [x] M9.0 v2.0 需求冻结、任务提示词、测试与 RAG 基线
+- [x] M9.1 上下文基础层：ContextPacket/Config、GSSC Builder、四类 Source、分区压缩
+- [x] M9.2 笔记系统：NoteStore / NoteTool / NoteContextSource（blocker 优先）
+- [x] M9.3 TerminalTool：白名单 / 沙箱 / 超时 / 截断 + shell=False 加固
+- [x] M9.4 Agent 集成：`context_builder` 可选注入三范式，默认行为不变
+- [x] M9.5 MCP：JSON-RPC over stdio、工具自动展开、自建旅行 server、离线 Demo
+- [x] M9.6 A2A：AgentCard/Task/Artifact、server/client/A2ATool、三 Agent Demo
+- [x] M9.7 评估：mini-BFCL、旅行 QA、行程质量、LLM Judge / Win Rate、EvaluationTool
+- [x] M9.8 对比报告（离线基线；在线 S2–S5 需 LLM_API_KEY）
+- [x] M9.9 回归、文档、版本与交付检查
