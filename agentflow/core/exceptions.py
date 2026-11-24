@@ -71,3 +71,7 @@ class MCPError(AgentFlowError):
 
 class A2AError(AgentFlowError):
     """A2A 协议错误（发现、鉴权、任务生命周期、超时等）。"""
+
+
+class EvaluationError(AgentFlowError):
+    """评估失败（数据集非法、指标无法计算、Judge 输出不可解析等）。"""

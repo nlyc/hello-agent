@@ -310,6 +310,13 @@ class _A2ARequestHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "Content-Length 非法"})
             return None
         if length > self.a2a.max_body_bytes:
+            # 小超限请求先读掉请求体，避免客户端收到连接重置；超大请求直接拒绝。
+            if 0 < length <= 10_000_000:
+                try:
+                    self.rfile.read(length)
+                except OSError:
+                    pass
+            self.close_connection = True
             self._send_json(413, {"error": "请求体过大"})
             return None
         try:
