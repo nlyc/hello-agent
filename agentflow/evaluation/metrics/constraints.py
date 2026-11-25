@@ -28,8 +28,6 @@ _NEGATIONS = (
 
 _LOCAL_NEGATIONS = ("不", "未", "无", "非", "免", "别", "没")
 
-_CONDITIONALS = ("若", "如果", "如遇", "遇", "逢", "恰逢", "万一", "备选", "对调", "改为")
-
 
 def check_itinerary(
     text: str, constraints: dict[str, Any] | None = None
@@ -50,11 +48,7 @@ def check_itinerary(
 
     budget = rules.get("budget")
     if budget is not None:
-        candidates = [
-            float(value)
-            for value in re.findall(r"(?:预算|花费|总价)[^\d]{0,6}(\d+(?:\.\d+)?)", source)
-        ]
-        checks["budget"] = bool(candidates) and max(candidates) <= float(budget)
+        checks["budget"] = _budget_ok(source, float(budget))
 
     must_include = [str(item) for item in rules.get("must_include", []) or []]
     if must_include:
@@ -117,6 +111,37 @@ _WEEKDAY_NEGATIONS = (
 _SCHEDULE_VERBS = ("去", "游", "安排", "参观", "行程", "逛", "玩")
 
 
+def _budget_ok(text: str, budget: float) -> bool:
+    """预算块内取最大金额与预算比较。
+
+    优先「预算明细 / 总预算 / 预算控制 / 合计」块；这些块里取最小的大额数字，
+    避免「多人同行会涨到 1000–1100」之类的调整段落把实际预算拉高。
+    """
+    blocks = re.split(r"\n\s*\n", str(text or ""))
+    budget_blocks = [
+        block
+        for block in blocks
+        if any(key in block for key in ("预算", "合计", "总价", "花费"))
+    ]
+    if not budget_blocks:
+        return False
+    preferred = [
+        block
+        for block in budget_blocks
+        if any(key in block for key in ("预算明细", "总预算", "预算控制", "合计"))
+    ]
+    maxima: list[float] = []
+    for block in preferred or budget_blocks:
+        numbers = [
+            float(value)
+            for value in re.findall(r"\d+(?:\.\d+)?", block)
+            if float(value) < 1_000_000
+        ]
+        if numbers:
+            maxima.append(max(numbers))
+    return bool(maxima) and min(maxima) <= budget
+
+
 def _violated(text: str, item: str) -> bool:
     """是否被正向安排：否定、闭馆、避开或条件句都不算违规。"""
     if item in _WEEKDAYS:
@@ -131,13 +156,14 @@ def _violated(text: str, item: str) -> bool:
                 return True
         return False
 
-    for index in _occurrences(text, item):
-        prefix = text[max(0, index - 10) : index]
-        suffix = text[index + len(item) : index + len(item) + 8]
-        context = f"{prefix}{suffix}"
-        if any(negation in context for negation in _NEGATIONS):
+    # 非周几项（如“爬坡”）：只在“行程/安排/参观”句子内判断；
+    # 引用资料或背景说明（“登顶需要连续爬坡”）不算安排。
+    for sentence in re.split(r"[。；;！？\n]+", text):
+        if not re.search(r"(D\d|第[一二三四五六七八九十]+天|安排|行程|参观|游览)", sentence):
             continue
-        if any(marker in prefix for marker in _CONDITIONALS):
-            continue
-        return True
+        for match in re.finditer(re.escape(item), sentence):
+            prefix = sentence[max(0, match.start() - 40) : match.start()]
+            if any(negation in prefix for negation in _NEGATIONS):
+                continue
+            return True
     return False

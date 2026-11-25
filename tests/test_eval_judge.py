@@ -155,3 +155,34 @@ def test_constraints_distinguish_negation():
         "尽量少爬坡；不安排登山。预算 1500 元。",
         {"budget": 1500, "must_avoid": ["爬坡"]},
     )["checks"]["must_avoid"]
+
+    # 预算块内取最大金额：「合计 ≤500」应通过，不会被前面的门票价误导。
+    assert check_itinerary(
+        "预算控制：故宫门票 60 元，交通餐饮预留 440 元，合计 ≤500 元。",
+        {"budget": 500},
+    )["checks"]["budget"]
+
+    # 调整段落里「多人会涨到 1000–1100」不应覆盖预算明细的实际合计。
+    assert check_itinerary(
+        "## 预算明细\n住宿 140 元，餐饮 170 元，合计 555 元，800 元内预留 245 元。\n\n"
+        "## 同行人调整\n若 2 人总预算仅 800 元会偏紧，建议提高到 1000–1100 元。",
+        {"budget": 800},
+    )["checks"]["budget"]
+
+    # 否定列表跨越较长距离；引用资料的「需要连续爬坡」不算安排。
+    assert check_itinerary(
+        "不安排：长城、景山、香山、颐和园万寿山等爬坡/台阶多的景点。"
+        "资料明确“登顶需要连续爬坡约一小时”。D2 安排室内博物馆。预算 1500 元。",
+        {"budget": 1500, "must_avoid": ["爬坡"]},
+    )["checks"]["must_avoid"]
+
+    # 但真实的「安排爬坡」仍应判违规。
+    assert not check_itinerary(
+        "D1 安排爬坡上山。预算 1500 元。",
+        {"budget": 1500, "must_avoid": ["爬坡"]},
+    )["checks"]["must_avoid"]
+
+    assert check_itinerary(
+        "不建议安排香山登顶：资料明确“登顶需要连续爬坡约一小时”。",
+        {"must_avoid": ["爬坡"]},
+    )["checks"]["must_avoid"]
