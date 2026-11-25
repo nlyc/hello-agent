@@ -155,10 +155,30 @@ class BaseLLM(ABC):
         json_mode: bool = False,
         tools: Optional[list[dict]] = None,
     ) -> str: ...
+
+    def chat_with_tools(
+        self,
+        messages: Sequence[Any],
+        *,
+        tools: Sequence[dict],
+        temperature: Optional[float] = None,
+    ) -> LLMResponse: ...
+
+@dataclass
+class ToolCallRequest:
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+@dataclass
+class LLMResponse:
+    content: str
+    tool_calls: list[ToolCallRequest]
 ```
 
 - `messages` 每项可为 `Message` 或 OpenAI 风格 dict。
 - `json_mode=True` 要求服务端返回 JSON 对象；`tools` 为原生 function calling 预留。
+- `chat_with_tools` 默认回退到 `chat`（无工具调用），旧实现无需改动；`OpenAICompatibleLLM` 覆盖它返回结构化 `tool_calls`。
 - 所有范式/工作流只依赖此协议，替换实现即可（测试注入 fake 靠它）。
 
 ### 3.2 `OpenAICompatibleLLM(BaseLLM)` — 公司中转站
@@ -168,6 +188,7 @@ class OpenAICompatibleLLM(BaseLLM):
     def __init__(self, base_url=None, api_key=None, model=None, temperature=0.2,
                  timeout=60.0, registry=None, client=None): ...
     def chat(self, messages, *, temperature=None, json_mode=False, tools=None) -> str
+    def chat_with_tools(self, messages, *, tools, temperature=None) -> LLMResponse
     def use_model(self, alias: str) -> None
 ```
 
@@ -304,9 +325,9 @@ class AsyncToolExecutor:
 
 ---
 
-## 5. `agentflow.agents`（三范式）
+## 5. `agentflow.agents`（四范式）
 
-三者构造签名一致地接受 `name / llm / system_prompt / config / memory / tracer`，共享 `run()` 入口与 trace 事件。
+四者构造签名一致地接受 `name / llm / system_prompt / config / memory / tracer / context_builder`，共享 `run()` 入口与 trace 事件。
 
 ### 5.1 `ReActAgent`
 
@@ -344,6 +365,20 @@ class PlanAndSolveAgent(Agent):
 
 - Planner 强制输出 Python 列表（`ast.literal_eval` 解析），Executor 五要素 `{question}{plan}{history}{current_step}`。
 - `custom_prompts` 覆盖 `planner / executor` 模板。
+
+### 5.4 `FunctionCallAgent`
+
+```python
+class FunctionCallAgent(Agent):
+    def __init__(self, name, llm, tools=None, system_prompt=None, config=None,
+                 custom_prompt=None, memory=None, tracer=None,
+                 memory_enabled=None, context_builder=None): ...
+```
+
+- 原生 Function Calling：`ToolRegistry.to_openai_schema()` 生成工具 schema，模型返回结构化 `tool_calls`，无正则解析。
+- 一次响应可返回多个工具调用；每个调用执行后以 `role="tool"` + `tool_call_id` 回填，继续循环。
+- 工具失败转成 `错误: ...` observation，不中断 Agent；超过 `config.agent.max_steps` 抛 `AgentError`。
+- 与 ReAct 共用 `ToolRegistry / memory / trace / context_builder`，区别只在协议层。
 
 ---
 
@@ -968,7 +1003,7 @@ JSONL 字段：`id / category / question / ground_truth / payload / metadata`。
 
 ```python
 ToolCall.from_text('f(a=1, b="x")') -> ToolCall
-evaluate_tool_calls(expected, actual, category="simple") -> dict
+evaluate_tool_calls(expected, actual, category="simple", loose_fields=("query",)) -> dict
 extract_final_answer(text) -> str
 quasi_exact_match(pred, gold) -> bool
 evaluate_qa(pred, gold, citations=None, expected_citations=None) -> dict
@@ -976,6 +1011,9 @@ LLMJudge(llm).judge(task, answer, reference="") -> JudgeResult
 WinRateJudge(llm).compare(task, a, b) -> dict
 check_itinerary(text, constraints) -> dict
 ```
+
+- 结构化参数严格 AST；`loose_fields` 中的自由文本参数（如 `query`）按 token 重叠匹配。
+- `evaluate_tool_calls` 返回 `matched / missing_calls / extra_calls / exact_match / passed`，用于区分漏调与过度调用。
 
 ### 15.3 评估器与工具
 
@@ -995,4 +1033,11 @@ render_report(report) / write_report(report, path)
 py -3.14 scripts/eval_v2.py --suite all --limit 5
 py -3.14 scripts/eval_v2.py --suite tool_calling --category irrelevance
 py -3.14 scripts/eval_v2.py --dry-run
+
+# 在线 S0/S1（需要项目 .env 的 LLM Key）
+py -3.14 scripts/eval_online_v2.py --suites all --limit 3 --out .cache/eval_online_full
+py -3.14 scripts/eval_online_v2.py --suites tool_calling --agent fc --limit 12 --out .cache/eval_online_fc
+
+# S2–S5 组合验证（Notes / MCP / A2A）
+py -3.14 scripts/eval_combo_v2.py --suite all --limit 6 --out .cache/eval_combo_s6
 ```

@@ -16,7 +16,7 @@ v2.0 在 v1.0 与 M8 记忆/RAG 之上新增：
 | `core` | Message / Config / Agent 基类 / exceptions |
 | `llm` | 可替换 Model Layer（公司中转站，OpenAI 兼容，换 model 即切换） |
 | `tools` | Tool / ToolRegistry（热插拔）/ ToolChain / 异步执行器 / builtin |
-| `agents` | ReActAgent / ReflectionAgent / PlanAndSolveAgent（均支持自动注入记忆上下文） |
+| `agents` | ReActAgent / ReflectionAgent / PlanAndSolveAgent / FunctionCallAgent（均支持自动注入记忆上下文） |
 | `memory` | 工作记忆（窗口+TTL）/ 长期记忆（SQLite 向量库）/ MemoryManager / Context/Memory 管理 |
 | `retrieval` | 文档加载（txt/md/pdf/docx/URL）/ 标题感知分块 / Embedder / BM25 / SQLite·Qdrant / RRF 混合检索 / RAGPipeline |
 | `context` | 上下文管线：GSSC / 六分区 / ContextPacket / Memory·RAG·History Source / 预算压缩 |
@@ -136,7 +136,7 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 |---|---|---|
 | D1 | 代码仓库（零外部框架依赖） | 本仓库 |
 | D2 | 架构图（Mermaid + PNG） | [`docs/architecture.md`](docs/architecture.md) + [`docs/architecture.png`](docs/architecture.png) |
-| D3 | 单元测试（292 个通过 / 3 跳过，全绿） | [`tests/`](tests/) |
+| D3 | 单元测试（433 个通过 / 4 跳过，全绿） | [`tests/`](tests/) |
 | D4 | 端到端演示 | [`examples/demo_e2e.py`](examples/demo_e2e.py) |
 | D5 | API 设计文档 | [`docs/api-design.md`](docs/api-design.md) |
 | D6 | 三范式轨迹对比报告 | [`docs/trajectory-comparison.md`](docs/trajectory-comparison.md) |
