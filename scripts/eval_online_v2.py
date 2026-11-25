@@ -185,6 +185,13 @@ def build_pipeline() -> Any:
     return _index_pipeline(HashingEmbedder())
 
 
+def _select_cases(dataset, args):
+    """按 offset + limit 选择样本，避免一次跑太久。"""
+    start = max(0, int(getattr(args, "offset", 0)))
+    end = start + max(0, int(args.limit))
+    return dataset.cases[start:end]
+
+
 def run_tool_calling(llm, dataset, args) -> list[tuple[str, Any]]:
     agent_cls = FunctionCallAgent if args.agent == "fc" else ReActAgent
     label = "S0_fc" if args.agent == "fc" else "S0_react"
@@ -195,9 +202,8 @@ def run_tool_calling(llm, dataset, args) -> list[tuple[str, Any]]:
         config=Config(agent=AgentConfig(max_steps=8)),
     )
     report = ToolCallingEvaluator(agent).run(
-        dataset.cases,
+        _select_cases(dataset, args),
         category=args.category,
-        limit=args.limit,
         system=f"{label}:{llm.model}",
     )
     return [("tool_calling_" + label, report)]
@@ -205,16 +211,17 @@ def run_tool_calling(llm, dataset, args) -> list[tuple[str, Any]]:
 
 def run_qa(llm, dataset, args) -> list[tuple[str, Any]]:
     pipeline = build_pipeline()
+    cases = _select_cases(dataset, args)
     reports = []
     s0 = QAEvaluator(
         lambda question: pipeline.answer(question, llm=llm),
         system=f"S0_rag:{llm.model}",
-    ).run(dataset.cases, limit=args.limit, category=args.category)
+    ).run(cases, category=args.category)
     reports.append(("qa_S0", s0))
 
     s1 = QAEvaluator(
         ContextRAG(pipeline, llm), system=f"S1_context_rag:{llm.model}"
-    ).run(dataset.cases, limit=args.limit, category=args.category)
+    ).run(cases, category=args.category)
     reports.append(("qa_S1", s1))
     return reports
 
@@ -222,6 +229,7 @@ def run_qa(llm, dataset, args) -> list[tuple[str, Any]]:
 def run_quality(llm, judge_llm, dataset, args) -> list[tuple[str, Any]]:
     pipeline = build_pipeline()
     judge = LLMJudge(judge_llm, temperature=0.0)
+    cases = _select_cases(dataset, args)
     reports = []
 
     s0_prompt = (
@@ -243,7 +251,7 @@ def run_quality(llm, judge_llm, dataset, args) -> list[tuple[str, Any]]:
             "quality_S0",
             ItineraryQualityEvaluator(
                 CallableAgent(s0_answer), judge=judge
-            ).run(dataset.cases, limit=args.limit, category=args.category),
+            ).run(cases, category=args.category),
         )
     )
 
@@ -269,7 +277,7 @@ def run_quality(llm, judge_llm, dataset, args) -> list[tuple[str, Any]]:
             "quality_S1",
             ItineraryQualityEvaluator(
                 CallableAgent(s1_answer), judge=judge
-            ).run(dataset.cases, limit=args.limit, category=args.category),
+            ).run(cases, category=args.category),
         )
     )
     return reports
@@ -283,6 +291,7 @@ def main(argv: list[str] | None = None) -> int:
         help="逗号分隔：tool_calling,qa,quality 或 all",
     )
     parser.add_argument("--limit", type=int, default=3, help="每个系统样本上限")
+    parser.add_argument("--offset", type=int, default=0, help="样本起始偏移，便于分批")
     parser.add_argument("--category", default=None, help="类别过滤")
     parser.add_argument(
         "--agent",
@@ -306,6 +315,7 @@ def main(argv: list[str] | None = None) -> int:
         "llm": llm_manifest,
         "judge": judge_manifest,
         "limit": args.limit,
+        "offset": args.offset,
         "category": args.category,
         "agent": args.agent,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -319,7 +329,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     for suite in suites:
         dataset = EvalDataset.load(DATA / dataset_files[suite], name=suite)
-        print(f"[{suite}] cases={len(dataset.cases)} limit={args.limit}")
+        print(f"[{suite}] cases={len(dataset.cases)} limit={args.limit} offset={args.offset}")
         if suite == "tool_calling":
             reports = run_tool_calling(llm, dataset, args)
         elif suite == "qa":
@@ -333,6 +343,7 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "dataset_sha256": dataset.sha256,
                     "limit": args.limit,
+                    "offset": args.offset,
                     "category": args.category or "all",
                     "timestamp": summary["timestamp"],
                 }
