@@ -11,6 +11,7 @@ from agentflow.evaluation import (
     ToolCallingEvaluator,
     calls_equal,
     evaluate_tool_calls,
+    loose_text_equal,
     match_calls,
     safe_eval,
 )
@@ -108,6 +109,23 @@ def test_loose_text_matching_for_free_text_fields():
         actual,
         loose_fields=["query"],
     )
+
+
+def test_loose_text_negative_cases():
+    negatives = [
+        ("故宫闭馆", "上海外滩夜景"),
+        ("北京天气", "杭州景点推荐"),
+        ("大熊猫基地", "西湖环湖骑行"),
+        ("故宫门票", "成都火锅"),
+        ("外滩夜景", "香山红叶"),
+        ("上海博物馆", "颐和园"),
+        ("西湖骑行", "都江堰"),
+        ("周一闭馆", "周五开放"),
+        ("天气", "酒店"),
+        ("亲子游", "商务出差"),
+    ]
+    for left, right in negatives:
+        assert not loose_text_equal(left, right), (left, right)
 
 
 def test_evaluate_tool_calls_with_loose_fields():

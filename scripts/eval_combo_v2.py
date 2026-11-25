@@ -159,7 +159,8 @@ def build_mcp_registry() -> tuple[ToolRegistry, MCPTool]:
 
 def run_s4(llm, args) -> list[tuple[str, Any]]:
     dataset = EvalDataset.load(DATA / "tool_calling.jsonl", name="tool_calling")
-    cases = dataset.cases[: args.limit]
+    start = max(0, int(getattr(args, "offset", 0)))
+    cases = dataset.cases[start : start + args.limit]
     s0_agent = ReActAgent(
         name="local-tools",
         llm=llm,
@@ -189,16 +190,28 @@ def run_s4(llm, args) -> list[tuple[str, Any]]:
     return [("tool_calling_S0", s0), ("tool_calling_S4_mcp", s4)]
 
 
+_CITY_FACTS = {
+    "北京": "故宫周一闭馆，需提前预约；颐和园东宫门一线平缓；带父母建议少走路。",
+    "上海": "外滩夜景 19:00–21:00 最佳；雨天优先上海博物馆与上海科技馆。",
+    "杭州": "西湖环湖约十五公里，适合骑行；亲子游建议减少爬山。",
+    "成都": "大熊猫基地早上开园时最佳；都江堰雨天山路湿滑，建议改期。",
+}
+
+
 def build_llm_servers(llm: Any) -> tuple[A2AServer, A2AServer, A2AServer]:
     """S5：规划师使用真实 LLM，资料员与审查员为确定性技能。"""
-    research = A2AServer("资料员", "收集北京事实")
+    research = A2AServer("资料员", "按用户需求收集城市事实")
 
-    @research.skill("gather_facts", "按用户需求收集北京事实")
+    @research.skill("gather_facts", "按用户需求收集城市事实")
     def gather_facts(payload):
         question = str(payload.get("input", "") or "")
+        city_facts = next(
+            (facts for city, facts in _CITY_FACTS.items() if city in question),
+            "北京：故宫周一闭馆；颐和园东宫门一线平缓。",
+        )
         return (
             f"用户需求：{question}\n"
-            "北京：故宫周一闭馆，需提前预约；颐和园东宫门一线平缓；"
+            f"{city_facts}\n"
             "预算与同行人以用户需求为准。"
         )
 
@@ -212,7 +225,7 @@ def build_llm_servers(llm: Any) -> tuple[A2AServer, A2AServer, A2AServer]:
                 {
                     "role": "system",
                     "content": (
-                        "你是旅行规划师。根据资料为带父母的北京两日游写计划："
+                        "你是旅行规划师。根据资料和用户需求写行程："
                         "必须写 D1/D2、预算、同行人约束，并标注依据。"
                     ),
                 },
@@ -226,16 +239,15 @@ def build_llm_servers(llm: Any) -> tuple[A2AServer, A2AServer, A2AServer]:
     @reviewer.skill("review_plan", "审查行程")
     def review_plan(payload):
         plan = str(payload.get("input", "") or "")
-        return f"审查：已避开周一闭馆，路线平缓。\n{plan}"
+        return f"审查：已核对闭馆日、预算与同行人约束，请确认预约。\n{plan}"
 
     return research, planner, reviewer
 
 
 def run_s5(llm, args) -> list[tuple[str, Any]]:
     dataset = EvalDataset.load(DATA / "itinerary_tasks.jsonl", name="quality")
-    cases = [
-        case for case in dataset.cases if "北京" in case.question
-    ][: args.limit]
+    start = max(0, int(getattr(args, "offset", 0)))
+    cases = dataset.cases[start : start + args.limit]
     research, planner, reviewer = build_llm_servers(llm)
     try:
         urls = [research.start(), planner.start(), reviewer.start()]
@@ -269,6 +281,7 @@ def main(argv: list[str] | None = None) -> int:
         "--suite", default="all", choices=("all", "s2", "s4", "s5")
     )
     parser.add_argument("--limit", type=int, default=3)
+    parser.add_argument("--offset", type=int, default=0, help="S5 起始样本偏移")
     parser.add_argument("--out", default=".cache/eval_combo")
     args = parser.parse_args(argv)
 
@@ -279,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
     summary: dict[str, Any] = {
         "llm": llm_manifest,
         "limit": args.limit,
+        "offset": args.offset,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "reports": {},
     }
@@ -294,6 +308,7 @@ def main(argv: list[str] | None = None) -> int:
             report.manifest.update(
                 {
                     "limit": args.limit,
+                    "offset": getattr(args, "offset", 0),
                     "timestamp": summary["timestamp"],
                 }
             )
