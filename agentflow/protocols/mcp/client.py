@@ -237,13 +237,19 @@ class MCPClient:
         tools = (result or {}).get("tools", [])
         return list(tools)
 
-    def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> str:
+    def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> str:
         """调用远程工具；``isError`` 时抛 ``MCPError``。"""
         self._ensure_connected()
         result = self._transport.request(
             "tools/call",
             {"name": name, "arguments": dict(arguments or {})},
-            timeout=self.timeout,
+            timeout=self.timeout if timeout is None else timeout,
         )
         result = dict(result or {})
         parts = [

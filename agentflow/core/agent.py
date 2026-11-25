@@ -76,6 +76,14 @@ class Agent(ABC):
         try:
             result = self._execute(input_text, **kwargs)
         except Exception as e:
+            # 失败轮次不应在历史里留下无回复的 user 消息，避免下一轮
+            # ContextBuilder 把它当成真实对话注入。
+            if (
+                self._history
+                and self._history[-1].role == "user"
+                and self._history[-1].content == input_text
+            ):
+                self._history.pop()
             self._emit("error", data={"error": str(e)})
             raise
         self._history.append(Message(role="assistant", content=result))

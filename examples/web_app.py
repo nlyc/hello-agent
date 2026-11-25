@@ -1767,6 +1767,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         except ValueError:
             length = 0
         if length > MAX_BODY_BYTES:
+            # 不读取超大请求体；关闭连接，避免未消费字节污染 keep-alive。
+            self.close_connection = True
             raise ApiError("请求体过大（上限 25 MB 文件）", 413)
         raw = self.rfile.read(length) if length > 0 else b""
         if not raw:

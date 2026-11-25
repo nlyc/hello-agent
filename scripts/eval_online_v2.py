@@ -211,16 +211,22 @@ def run_tool_calling(llm, dataset, args) -> list[tuple[str, Any]]:
 
 def run_qa(llm, dataset, args) -> list[tuple[str, Any]]:
     pipeline = build_pipeline()
+    from scripts.eval_rag import _citation_map
+
+    citation_map = _citation_map()
     cases = _select_cases(dataset, args)
     reports = []
     s0 = QAEvaluator(
         lambda question: pipeline.answer(question, llm=llm),
         system=f"S0_rag:{llm.model}",
+        citation_map=citation_map,
     ).run(cases, category=args.category)
     reports.append(("qa_S0", s0))
 
     s1 = QAEvaluator(
-        ContextRAG(pipeline, llm), system=f"S1_context_rag:{llm.model}"
+        ContextRAG(pipeline, llm),
+        system=f"S1_context_rag:{llm.model}",
+        citation_map=citation_map,
     ).run(cases, category=args.category)
     reports.append(("qa_S1", s1))
     return reports

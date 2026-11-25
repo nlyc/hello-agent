@@ -46,7 +46,7 @@ class NoteContextSource:
             seen.add(note.id)
             packets.append(_note_to_packet(note, current))
         packets.sort(key=lambda packet: (-packet.relevance_score, -packet.timestamp.timestamp()))
-        return packets
+        return packets[:limit]
 
 
 def _note_to_packet(note: Note, now: datetime) -> ContextPacket:

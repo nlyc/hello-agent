@@ -143,6 +143,23 @@ def test_invalid_id_and_type(tmp_path):
         store.create("类型错误", type="unknown")
 
 
+def test_filename_wins_over_front_matter_id(tmp_path):
+    store = make_store(tmp_path)
+    path = store.directory / "note-filename.md"
+    path.write_text(
+        "---\n"
+        'id: "note-other"\n'
+        'title: "文件名优先"\n'
+        'type: "conclusion"\n'
+        "---\n"
+        "正文\n",
+        encoding="utf-8",
+    )
+    note = store.read("note-filename")
+    assert note.id == "note-filename"
+    assert store.list()[0].id == "note-filename"
+
+
 def test_user_isolation(tmp_path):
     alice = make_store(tmp_path, "alice")
     bob = make_store(tmp_path, "bob")

@@ -41,6 +41,8 @@ def test_read_only_commands(tmp_path):
     assert tool.run({"command": "cat a.md"}).startswith("故宫周一闭馆")
     assert tool.run({"command": "head -n 1 a.md"}) == "故宫周一闭馆"
     assert tool.run({"command": "tail -n 1 a.md"}) == "需要提前预约"
+    assert tool.run({"command": "head -n 0 a.md"}) == "（空文件）"
+    assert tool.run({"command": "tail -n 0 a.md"}) == "（空文件）"
     assert tool.run({"command": "echo 你好 世界"}) == "你好 世界"
     assert "a.md" in tool.run({"command": 'find . -name "*.md"'})
     assert "c.md" in tool.run({"command": 'find sub -name "*.md"'})
@@ -88,7 +90,7 @@ def test_pipes_disabled_by_default(tmp_path):
 def test_external_command_pipeline_and_exit_code(tmp_path):
     tool = make_tool(
         tmp_path,
-        allowed_commands=[Path(sys.executable).name],
+        allowed_commands=[str(Path(sys.executable))],
         allow_pipes=True,
     )
     workspace = tool.workspace
@@ -112,7 +114,9 @@ def test_external_command_pipeline_and_exit_code(tmp_path):
 
 
 def test_timeout(tmp_path):
-    tool = make_tool(tmp_path, allowed_commands=[Path(sys.executable).name], timeout=0.2)
+    tool = make_tool(
+        tmp_path, allowed_commands=[str(Path(sys.executable))], timeout=0.2
+    )
     (tool.workspace / "sleep.py").write_text(
         "import time\ntime.sleep(2)\n", encoding="utf-8"
     )
@@ -146,6 +150,16 @@ def test_symlink_escape_is_blocked(tmp_path):
     except (OSError, NotImplementedError):
         pytest.skip("当前平台不允许创建符号链接")
     assert "路径越界" in tool.run({"command": "cat link.md"})
+
+
+def test_absolute_executable_outside_workspace_is_blocked(tmp_path):
+    tool = make_tool(
+        tmp_path, allowed_commands=[Path(sys.executable).name]
+    )
+    result = tool.run(
+        {"command": f'"{Path(sys.executable).as_posix()}" --version'}
+    )
+    assert "路径越界" in result or "不允许的命令" in result
 
 
 def test_empty_command_and_non_terminal_registry(tmp_path):

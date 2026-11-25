@@ -8,6 +8,7 @@ from agentflow.core.exceptions import ToolError
 from agentflow.protocols.mcp import (
     InMemoryTransport,
     MCPClient,
+    MCPRemoteTool,
     MCPServer,
     MCPTool,
 )
@@ -110,3 +111,25 @@ def test_close_marks_transport_closed():
     assert tool.client._transport.closed is True
     with pytest.raises(Exception):
         MCPClient(transport=tool.client._transport).list_tools()
+
+
+def test_remote_tool_uses_configured_call_timeout():
+    class RecordingClient:
+        def __init__(self) -> None:
+            self.timeout = None
+
+        def call_tool(self, name, arguments=None, *, timeout=None):
+            self.timeout = timeout
+            return "ok"
+
+    client = RecordingClient()
+    wrapper = MCPRemoteTool(
+        client=client,
+        remote_name="slow",
+        public_name="slow",
+        description="slow tool",
+        input_schema={},
+        timeout=42.0,
+    )
+    assert wrapper.run({}) == "ok"
+    assert client.timeout == 42.0

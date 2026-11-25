@@ -82,16 +82,18 @@ def _extract_json(text: str) -> dict[str, Any]:
     """从文本中提取第一个 JSON 对象；失败抛 ``EvaluationError``。"""
     source = str(text or "").strip()
     source = re.sub(r"^```(?:json)?\s*|\s*```$", "", source, flags=re.IGNORECASE)
-    match = re.search(r"\{.*\}", source, re.DOTALL)
-    if not match:
+    start = source.find("{")
+    if start < 0:
         raise EvaluationError("Judge 输出中没有 JSON 对象")
-    try:
-        payload = json.loads(match.group(0))
-    except ValueError as exc:
-        raise EvaluationError(f"Judge JSON 解析失败：{exc}") from exc
-    if not isinstance(payload, dict):
-        raise EvaluationError("Judge JSON 必须是对象")
-    return payload
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", source):
+        try:
+            payload, _ = decoder.raw_decode(source[match.start() :])
+        except ValueError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    raise EvaluationError("Judge 输出中没有可解析的 JSON 对象")
 
 
 class LLMJudge:

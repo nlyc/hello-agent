@@ -107,10 +107,23 @@ class TerminalTool(Tool):
         if not self.workspace.is_dir():
             raise ToolError(f"terminal workspace 不是目录：{self.workspace}")
         self._cwd = self.workspace
-        self.allowed_commands = {
-            str(command).strip().lower().removesuffix(".exe")
+        entries = [
+            str(command).strip()
             for command in (allowed_commands or _DEFAULT_COMMANDS)
             if str(command).strip()
+        ]
+        path_entries = [
+            entry
+            for entry in entries
+            if any(separator in entry for separator in ("/", "\\", ":"))
+        ]
+        self.allowed_commands = {
+            entry.lower().removesuffix(".exe")
+            for entry in entries
+            if entry not in path_entries
+        }
+        self.allowed_paths = {
+            str(Path(entry).expanduser().resolve()) for entry in path_entries
         }
         self.timeout = float(timeout)
         self.max_output_bytes = max(1, int(max_output_bytes))
@@ -183,6 +196,12 @@ class TerminalTool(Tool):
                 raise ToolError(f"不允许的{label}")
 
     def _is_allowed(self, command: str) -> bool:
+        if any(separator in command for separator in ("/", "\\", ":")):
+            try:
+                resolved = str(Path(command).expanduser().resolve())
+            except OSError:
+                return False
+            return resolved in self.allowed_paths
         name = Path(command).name
         if name.lower().endswith(".exe"):
             name = name[:-4]
@@ -230,9 +249,17 @@ class TerminalTool(Tool):
         input_text: str | None = None,
     ) -> str:
         command = argv[0]
-        executable = shutil.which(command)
-        if executable is None:
-            raise ToolError(f"命令不存在或不在 PATH：{command}")
+        if any(separator in command for separator in ("/", "\\", ":")):
+            resolved = Path(command).expanduser().resolve()
+            if str(resolved) not in self.allowed_paths:
+                raise ToolError(f"路径越界：{command}")
+            if not resolved.is_file():
+                raise ToolError(f"可执行文件不存在：{command}")
+            executable = str(resolved)
+        else:
+            executable = shutil.which(command)
+            if executable is None:
+                raise ToolError(f"命令不存在或不在 PATH：{command}")
         self._validate_argv_paths(argv, cwd)
         env = dict(os.environ)
         env.setdefault("PYTHONIOENCODING", "utf-8")
@@ -339,6 +366,8 @@ class TerminalTool(Tool):
     ) -> str:
         if not paths:
             raise ToolError("head/tail 需要文件路径")
+        if count <= 0:
+            return "（空文件）"
         path = self._resolve_path(paths[0], cwd)
         lines = self._read_text(path).splitlines()
         selected = lines[:count] if head else lines[-count:]

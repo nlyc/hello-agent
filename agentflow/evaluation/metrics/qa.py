@@ -128,16 +128,24 @@ def containment_match(prediction: Any, gold: Any) -> bool:
     return bool(right) and right in left
 
 
+def _citation_norm(text: Any) -> str:
+    """引用比较归一化：去空白、斜杠、标点，避免排版差异误判。"""
+    return re.sub(r"[\s/\\|,，、;；:：]+", "", str(text or "").lower())
+
+
 def citation_coverage(
     citations: Sequence[str] | None, expected: Sequence[str] | None
-) -> float:
-    """期望引用被实际引用覆盖的比例；无期望时记 1.0。"""
+) -> float | None:
+    """期望引用被实际引用覆盖的比例；没有期望时返回 ``None``（不参与聚合）。"""
     targets = [str(item).strip() for item in (expected or []) if str(item).strip()]
     if not targets:
-        return 1.0
+        return None
     actual = [str(item).strip() for item in (citations or []) if str(item).strip()]
+    actual_norm = [_citation_norm(item) for item in actual]
     covered = sum(
-        1 for target in targets if any(target in citation for citation in actual)
+        1
+        for target in targets
+        if any(_citation_norm(target) and _citation_norm(target) in citation for citation in actual_norm)
     )
     return covered / len(targets)
 
@@ -149,12 +157,15 @@ def evaluate_qa(
     citations: Sequence[str] | None = None,
     expected_citations: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    """单题 QA 指标：QEM / 包含 / 引用覆盖 / 是否通过。"""
+    """单题 QA 指标：QEM / 包含 / 引用覆盖。
+
+    引用覆盖是独立诊断指标，不参与 ``passed``；答案正确性只看 QEM/包含。
+    """
     answer = extract_final_answer(prediction)
     exact = quasi_exact_match(answer, gold)
     contains = containment_match(answer, gold)
     coverage = citation_coverage(citations, expected_citations)
-    passed = (exact or contains) and coverage >= 1.0
+    passed = exact or contains
     return {
         "answer": answer,
         "exact_match": exact,

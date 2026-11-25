@@ -46,3 +46,11 @@ def test_exclude_task_state(tmp_path):
     packets = source.gather("行程", limit=10, now=NOW)
     assert packets and packets[0].metadata["type"] == "task_state"
     assert packets[0].section == "context"
+
+
+def test_gather_respects_global_limit(tmp_path):
+    store = make_store(tmp_path)
+    for index in range(6):
+        store.create(f"阻塞 {index}", "需要处理", type="blocker", tags=["北京"])
+    packets = NoteContextSource(store).gather("北京", limit=2, now=NOW)
+    assert len(packets) == 2

@@ -254,7 +254,8 @@ class NoteStore:
             raise NoteError(f"读取笔记失败：{exc}") from exc
         front, body = _split_front_matter(text)
         data = dict(front)
-        data.setdefault("id", path.stem)
+        # 文件名即 ID；front matter 中的 id 只作参考，避免手工编辑后失联。
+        data["id"] = path.stem
         data.setdefault("title", path.stem)
         data.setdefault("type", "task_state")
         data["tags"] = _as_tags(data.get("tags"))

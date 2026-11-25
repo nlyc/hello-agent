@@ -23,6 +23,15 @@ def test_parse_judge_output_with_code_fence():
     assert result.comment == "不错"
 
 
+def test_parse_judge_output_with_prefix_brace():
+    result = parse_judge_output(
+        '说明 {不是 JSON} 结果: {"feasibility": 4, "constraint_compliance": 4, '
+        '"information_quality": 4, "format": 4}'
+    )
+    assert result.scores["feasibility"] == 4
+    assert result.average == 4.0
+
+
 def test_parse_judge_output_missing_fields_scores_zero():
     result = parse_judge_output('{"feasibility": 5}')
     assert result.scores["feasibility"] == 5

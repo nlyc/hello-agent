@@ -64,7 +64,10 @@ def test_extract_final_answer():
 def test_citation_coverage_and_evaluate_qa():
     assert citation_coverage(["guide.md p.1", "guide.md p.2"], ["p.1"]) == 1.0
     assert citation_coverage(["guide.md p.1"], ["p.1", "p.2"]) == 0.5
-    assert citation_coverage([], []) == 1.0
+    assert citation_coverage(
+        ["北京旅行知识/故宫"], ["北京旅行知识 / 故宫"]
+    ) == 1.0
+    assert citation_coverage([], []) is None
 
     result = evaluate_qa(
         "FINAL ANSWER: 周一闭馆",
@@ -73,7 +76,22 @@ def test_citation_coverage_and_evaluate_qa():
         expected_citations=["p.1"],
     )
     assert result["exact_match"] is True
+    assert result["citation_coverage"] == 1.0
     assert result["passed"] is True
+
+    # 没有引用期望时，引用覆盖不参与通过判定，也不应伪装成 1.0。
+    no_citation = evaluate_qa("FINAL ANSWER: 周一闭馆", "周一闭馆")
+    assert no_citation["passed"] is True
+    assert no_citation["citation_coverage"] is None
+
+    # 引用覆盖是独立诊断指标：答案正确但引用为空，仍算通过。
+    missing_citation = evaluate_qa(
+        "FINAL ANSWER: 周一闭馆",
+        "周一闭馆",
+        expected_citations=["p.1"],
+    )
+    assert missing_citation["passed"] is True
+    assert missing_citation["citation_coverage"] == 0.0
 
 
 def test_qa_evaluator():
@@ -112,3 +130,19 @@ def test_qa_evaluator_records_invalid_callable_as_case_error():
     )
     assert report.cases[0].error
     assert not report.cases[0].passed
+
+
+def test_qa_evaluator_resolves_gold_chunks_to_citations():
+    case = EvalCase(
+        id="q1",
+        suite="qa",
+        question="故宫周几闭馆？",
+        ground_truth="周一闭馆",
+        metadata={"gold_chunk_ids": ["c1"]},
+    )
+    report = QAEvaluator(
+        lambda question: "FINAL ANSWER: 周一闭馆\n依据：故宫 p.1",
+        citation_map={"c1": "故宫 p.1"},
+    ).run([case])
+    assert report.cases[0].metrics["citation_coverage"] == 1.0
+    assert report.metrics["citation_cases"] == 1

@@ -122,14 +122,19 @@ class NotesContextRAG:
 def run_s2(llm, args) -> list[tuple[str, Any]]:
     dataset = EvalDataset.load(DATA / "travel_qa.jsonl", name="qa")
     pipeline = build_pipeline()
+    from scripts.eval_rag import _citation_map
+
+    citation_map = _citation_map()
     notes = seed_notes(Path(args.out) / "notes")
     s1 = QAEvaluator(
         ContextRAG(pipeline, llm),
         system=f"S1_context_rag:{llm.model}",
+        citation_map=citation_map,
     ).run(dataset.cases, limit=args.limit)
     s2 = QAEvaluator(
         NotesContextRAG(pipeline, llm, notes),
         system=f"S2_context_rag_notes:{llm.model}",
+        citation_map=citation_map,
     ).run(dataset.cases, limit=args.limit)
     for report in (s1, s2):
         report.manifest["dataset_sha256"] = dataset.sha256

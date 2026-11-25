@@ -19,9 +19,16 @@ class QAEvaluator:
         system: 报告中的系统名。
     """
 
-    def __init__(self, answer_fn: Any, *, system: str = "qa") -> None:
+    def __init__(
+        self,
+        answer_fn: Any,
+        *,
+        system: str = "qa",
+        citation_map: dict[str, str] | None = None,
+    ) -> None:
         self.answer_fn = answer_fn
         self.system = system
+        self.citation_map = dict(citation_map or {})
 
     def run(
         self,
@@ -53,6 +60,13 @@ class QAEvaluator:
             expected_citations = list(
                 case.metadata.get("expected_citations", []) or []
             )
+            if not expected_citations and self.citation_map:
+                gold_chunks = list(case.metadata.get("gold_chunk_ids", []) or [])
+                expected_citations = [
+                    self.citation_map[chunk_id]
+                    for chunk_id in gold_chunks
+                    if chunk_id in self.citation_map
+                ]
             gold = str(case.ground_truth if case.ground_truth is not None else "")
             metrics = evaluate_qa(
                 output,
@@ -60,6 +74,8 @@ class QAEvaluator:
                 citations=citations,
                 expected_citations=expected_citations,
             )
+            metrics["citations"] = list(citations)
+            metrics["expected_citations"] = list(expected_citations)
             metrics["error"] = error
             results.append(
                 EvalResult(
@@ -121,6 +137,11 @@ def _aggregate(results: Sequence[EvalResult]) -> dict[str, Any]:
     total = len(results)
     if not total:
         return {"cases": 0, "passed": 0, "accuracy": 0.0, "qem": 0.0}
+    coverages = [
+        float(item.metrics["citation_coverage"])
+        for item in results
+        if item.metrics.get("citation_coverage") is not None
+    ]
     return {
         "cases": total,
         "passed": sum(1 for item in results if item.passed),
@@ -131,9 +152,9 @@ def _aggregate(results: Sequence[EvalResult]) -> dict[str, Any]:
         "contains": sum(
             1 for item in results if item.metrics.get("contains")
         ) / total,
-        "citation_coverage": sum(
-            float(item.metrics.get("citation_coverage", 0.0))
-            for item in results
-        ) / total,
+        "citation_coverage": (
+            sum(coverages) / len(coverages) if coverages else None
+        ),
+        "citation_cases": len(coverages),
         "errors": sum(1 for item in results if item.error),
     }

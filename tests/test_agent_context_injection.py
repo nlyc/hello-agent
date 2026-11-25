@@ -199,3 +199,16 @@ def test_context_config_from_env(monkeypatch: pytest.MonkeyPatch):
     assert config.relevance_weight == 0.5
     assert config.recency_weight == 0.5
     assert config.recent_history == 2
+
+
+def test_failed_run_does_not_keep_user_message():
+    from agentflow.core.agent import Agent
+
+    class BoomAgent(Agent):
+        def _execute(self, input_text, **kwargs):
+            raise RuntimeError("boom")
+
+    agent = BoomAgent(name="boom", llm=ScriptedLLM())
+    with pytest.raises(RuntimeError):
+        agent.run("问题")
+    assert agent.get_history() == []

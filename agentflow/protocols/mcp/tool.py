@@ -121,7 +121,9 @@ class MCPTool(Tool):
                 arguments, error = _as_arguments(params.get("arguments"))
                 if error:
                     return error
-                return self.client.call_tool(tool, arguments)
+                return self.client.call_tool(
+                    tool, arguments, timeout=self.call_timeout
+                )
             return f"错误: 未知 action '{action}'，可用：list / call"
         except (MCPError, ToolError) as exc:
             return f"错误: {exc}"
@@ -179,7 +181,9 @@ class MCPRemoteTool(Tool):
         arguments = coerce_arguments(parameters or {}, self.input_schema)
         started = time.perf_counter()
         try:
-            result = self.client.call_tool(self.remote_name, arguments)
+            result = self.client.call_tool(
+                self.remote_name, arguments, timeout=self.timeout
+            )
         except Exception as exc:
             self._emit(
                 {
