@@ -46,6 +46,7 @@ from agentflow.tools import ToolRegistry
 from scripts.eval_online_v2 import (
     CallableAgent,
     ContextRAG,
+    build_judge_llm,
     build_llm,
     build_pipeline,
     build_registry,
@@ -244,7 +245,7 @@ def build_llm_servers(llm: Any) -> tuple[A2AServer, A2AServer, A2AServer]:
     return research, planner, reviewer
 
 
-def run_s5(llm, args) -> list[tuple[str, Any]]:
+def run_s5(llm, judge_llm, args) -> list[tuple[str, Any]]:
     dataset = EvalDataset.load(DATA / "itinerary_tasks.jsonl", name="quality")
     start = max(0, int(getattr(args, "offset", 0)))
     cases = dataset.cases[start : start + args.limit]
@@ -266,7 +267,7 @@ def run_s5(llm, args) -> list[tuple[str, Any]]:
             return review
 
         report = ItineraryQualityEvaluator(
-            CallableAgent(answer), judge=LLMJudge(llm)
+            CallableAgent(answer), judge=LLMJudge(judge_llm)
         ).run(cases)
         report.manifest["dataset_sha256"] = dataset.sha256
         return [("quality_S5_a2a_llm", report)]
@@ -286,11 +287,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     llm, llm_manifest = build_llm()
+    judge_llm, judge_manifest = build_judge_llm(llm)
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     suites = ["s2", "s4", "s5"] if args.suite == "all" else [args.suite]
     summary: dict[str, Any] = {
         "llm": llm_manifest,
+        "judge": judge_manifest,
         "limit": args.limit,
         "offset": args.offset,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -303,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
         elif suite == "s4":
             reports = run_s4(llm, args)
         else:
-            reports = run_s5(llm, args)
+            reports = run_s5(llm, judge_llm, args)
         for name, report in reports:
             report.manifest.update(
                 {

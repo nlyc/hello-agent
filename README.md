@@ -101,7 +101,7 @@ Copy-Item .env.example .env    # 然后按需填写
 | 终端 | `TERMINAL_WORKSPACE`（默认沙箱由调用方显式传入；`allowed_commands` / 超时 / 截断可构造传参） |
 | MCP | server 命令由 `MCPTool(command=[...])` 显式传入；连接/调用超时可构造传参 |
 | A2A | 默认 `127.0.0.1:0`；`A2A_TOKEN` / 超时 / 1MB 上限可构造传参 |
-| 评估 | 数据集默认 `data/eval/`；`EVAL_JUDGE_MODEL` / `EVAL_TEMPERATURE` 只影响在线 Judge |
+| 评估 | 数据集默认 `data/eval/`；`EVAL_JUDGE_MODEL` / `EVAL_JUDGE_BASE_URL` / `EVAL_JUDGE_API_KEY` 可配置独立 Judge；`EVAL_TEMPERATURE` 只影响在线 Judge |
 
 `.env` 已被 `.gitignore` 忽略，不会提交；`.env.example` 只保留占位值。
 Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后端与向量库并自动重建索引，
@@ -118,6 +118,10 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 | 概览 | 索引 / 记忆统计、运行环境、检索与在线能力（切换 Embedding / 向量库、查看 LLM/搜索/Qdrant 配置与 SQLite 占用）、快捷入口；可关闭“写入内置示例”（4 篇知识文档 + 2 条演示记忆），关闭后立即移除并在重启后保持关闭，也可用 `--no-seed` 启动 |
 | 知识库 / RAG | 上传 MD/TXT/PDF/DOCX、公网 URL 入库、删除文档、混合 / BM25 / 向量检索、带引用问答（自动 / 在线 LLM / 仅检索）；问题点名但知识库未收录的城市或景点会明确提示，不用其它地点凑答案；若配置了搜索 Key 且 `SEARCH_FALLBACK=true`，会自动联网检索并由在线 LLM 总结（回答标注“答案来源：联网搜索”） |
 | 记忆 | 写入 semantic/episodic/procedural 记忆、记录对话轮次、检索、构建注入上下文、清空；首次启动的 2 条北京演示记忆可通过“概览”开关移除 |
+| 上下文 | 用 ContextBuilder 构建六分区上下文预览，展示 tokens、分区、packets 与丢弃统计 |
+| 笔记 | 新建 / 列出 / 删除 Markdown 笔记，支持 blocker、action、conclusion 等类型 |
+| 协议 | 发现自建旅行 MCP server 的工具；读取 A2A 资料员/规划师/审查员 AgentCard |
+| v2 评估 | 运行 `scripts/eval_v2.py` 离线负基线（tool_calling / qa / quality / all） |
 | 三范式 | ReAct / Reflection / Plan-and-Solve 无记忆 vs 有记忆对照；始终使用在线 LLM，ReAct 的天气工具通过 wttr.in 观测接口取实时气温（不可用时降级为搜索摘要并标注），景点工具直接联网查询，Reflection / Plan-and-Solve 注入同一份实时检索资料；“有记忆”读取“记忆”页签中的真实长期记忆，且只读不写回；运行完成后播放一次提示音；需要配置 `LLM_API_KEY` 与 `TAVILY_API_KEY`（或 SerpAPI） |
 | 完整 Demo | 全在线模式：基于你输入的问题与当前知识库检索，由在线 LLM 生成带引用的回答，知识库未命中时自动联网补充；报告只包含本次问题的真实结果，不再输出固定北京模拟章节；可勾选“并入当前知识库”把上传文档加入临时索引；运行完成后播放一次提示音；需要 `LLM_API_KEY` |
 | RAG 评估 | 运行 `scripts/eval_rag.py` 的固定 benchmark（`data/eval/travel_qa.jsonl` + 内置四城语料），展示 recall@k / MRR / 事实命中 / 引用覆盖；不评估控制台上传的文档 |
@@ -136,7 +140,7 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 |---|---|---|
 | D1 | 代码仓库（零外部框架依赖） | 本仓库 |
 | D2 | 架构图（Mermaid + PNG） | [`docs/architecture.md`](docs/architecture.md) + [`docs/architecture.png`](docs/architecture.png) |
-| D3 | 单元测试（434 个通过 / 4 跳过，全绿） | [`tests/`](tests/) |
+| D3 | 单元测试（440 个通过 / 4 跳过，全绿） | [`tests/`](tests/) |
 | D4 | 端到端演示 | [`examples/demo_e2e.py`](examples/demo_e2e.py) |
 | D5 | API 设计文档 | [`docs/api-design.md`](docs/api-design.md) |
 | D6 | 三范式轨迹对比报告 | [`docs/trajectory-comparison.md`](docs/trajectory-comparison.md) |

@@ -258,9 +258,13 @@
     overview: loadStatus,
     knowledge: loadDocuments,
     memory: loadMemory,
+    context: null,
+    notes: loadNotes,
     paradigms: null,
+    protocols: null,
     demo: loadRuns,
     eval: loadEvalCases,
+    'eval-v2': null,
     tests: loadTests,
   };
 
@@ -1097,6 +1101,141 @@
     }).catch(reason);
   }
 
+  // ------------------------------------------------------------ v2.0 上下文
+
+  async function buildContextPreview(event) {
+    event.preventDefault();
+    const button = event.submitter || event.target.querySelector('button[type="submit"]');
+    const query = $('#ctx-query').value.trim();
+    if (!query) return;
+    await withBusy(button, '构建中…', async () => {
+      const result = await api('/api/context/build', {
+        method: 'POST',
+        body: { query, max_tokens: Number($('#ctx-max').value) || 3000 },
+      });
+      const stats = result.stats || {};
+      const sections = (stats.sections || []).join(' / ') || '—';
+      $('#ctx-stats').innerHTML = `
+        <p class="hint">tokens=${esc(stats.total_tokens ?? '—')} ·
+        sections=${esc(sections)} ·
+        packets=${esc(stats.packets_selected ?? '—')} ·
+        dropped=${esc((stats.packets_dropped_relevance || 0) + (stats.packets_dropped_budget || 0))}</p>`;
+      $('#ctx-preview').textContent = result.text || '（空上下文）';
+    }).catch(reason);
+  }
+
+  // -------------------------------------------------------------- v2.0 笔记
+
+  async function loadNotes() {
+    const data = await api('/api/notes');
+    const notes = data.notes || [];
+    const tbody = $('#note-rows');
+    if (!notes.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">暂无笔记</td></tr>';
+    } else {
+      tbody.innerHTML = notes
+        .map(
+          (note) => `<tr>
+            <td>${esc(note.type)}</td>
+            <td>${esc(note.title)}</td>
+            <td>${esc((note.tags || []).join(', ') || '—')}</td>
+            <td>${esc(note.updated_at || '—')}</td>
+            <td><button class="ghost-btn danger" data-delete-note="${esc(note.id)}">删除</button></td>
+          </tr>`
+        )
+        .join('');
+    }
+    const summary = data.summary || {};
+    $('#notes-summary').textContent =
+      `共 ${summary.total ?? notes.length} 条；blocker ${summary.unresolved_blockers ?? 0}；` +
+      `index_consistent=${summary.index_consistent ?? '—'}`;
+  }
+
+  async function createNote(event) {
+    event.preventDefault();
+    const button = event.submitter || event.target.querySelector('button[type="submit"]');
+    await withBusy(button, '保存中…', async () => {
+      await api('/api/notes/create', {
+        method: 'POST',
+        body: {
+          title: $('#note-title').value,
+          type: $('#note-type').value,
+          tags: $('#note-tags').value,
+          content: $('#note-content').value,
+        },
+      });
+      event.target.reset();
+      await loadNotes();
+      toast('笔记已保存');
+    }).catch(reason);
+  }
+
+  async function deleteNote(noteId) {
+    try {
+      await api('/api/notes/delete', {
+        method: 'POST',
+        body: { note_id: noteId },
+      });
+      await loadNotes();
+      toast('笔记已删除');
+    } catch (error) {
+      reason(error);
+    }
+  }
+
+  // -------------------------------------------------------------- v2.0 协议
+
+  async function discoverMcp(event) {
+    const button = event.currentTarget;
+    await withBusy(button, '发现中…', async () => {
+      const data = await api('/api/protocols/mcp');
+      const server = data.server || {};
+      const tools = (data.tools || [])
+        .map((tool) => `<li><strong>${esc(tool.name)}</strong>：${esc(tool.description || '')}</li>`)
+        .join('');
+      $('#mcp-result').innerHTML = `
+        <p class="hint">${esc(server.name || 'MCP')} ${esc(server.version || '')} ·
+        ${esc(data.duration_ms ?? '—')} ms</p>
+        <ul>${tools || '<li class="empty">未发现工具</li>'}</ul>`;
+    }).catch(reason);
+  }
+
+  async function loadA2ACards(event) {
+    const button = event.currentTarget;
+    await withBusy(button, '读取中…', async () => {
+      const data = await api('/api/protocols/a2a');
+      const agents = (data.agents || [])
+        .map((agent) => {
+          const card = agent.card || {};
+          const skills = (card.skills || []).map((skill) => skill.name).join(' / ');
+          return `<li><strong>${esc(card.name)}</strong>：${esc(card.description || '')}<br>
+            <span class="mono">${esc(agent.url)}</span><br>
+            skills: ${esc(skills || '—')}</li>`;
+        })
+        .join('');
+      $('#a2a-result').innerHTML = `<ul>${agents || '<li class="empty">未读取到 AgentCard</li>'}</ul>`;
+    }).catch(reason);
+  }
+
+  // ------------------------------------------------------------ v2.0 评估
+
+  async function runEvalV2(event) {
+    event.preventDefault();
+    const button = event.submitter || event.target.querySelector('button[type="submit"]');
+    await withBusy(button, '运行中…', async () => {
+      $('#eval-v2-output').textContent = '正在运行离线基线…';
+      const result = await api('/api/eval/v2/run', {
+        method: 'POST',
+        body: {
+          suite: $('#eval-v2-suite').value,
+          limit: Number($('#eval-v2-limit').value) || 5,
+        },
+      });
+      $('#eval-v2-output').textContent = result.output || '（无输出）';
+      toast(result.returncode === 0 ? '评估完成' : '评估存在失败，请查看输出', result.returncode === 0 ? 'ok' : 'err');
+    }).catch(reason);
+  }
+
   // ------------------------------------------------------------------ 主题
 
   function initTheme() {
@@ -1165,6 +1304,17 @@
     $('#memory-importance').addEventListener('input', (event) => {
       $('#importance-out').textContent = Number(event.target.value).toFixed(1);
     });
+
+    $('#ctx-form').addEventListener('submit', buildContextPreview);
+    $('#note-form').addEventListener('submit', createNote);
+    $('#notes-refresh').addEventListener('click', () => loadNotes().catch(reason));
+    $('#note-rows').addEventListener('click', (event) => {
+      const button = event.target.closest('[data-delete-note]');
+      if (button) deleteNote(button.dataset.deleteNote);
+    });
+    $('#mcp-discover').addEventListener('click', discoverMcp);
+    $('#a2a-cards').addEventListener('click', loadA2ACards);
+    $('#eval-v2-form').addEventListener('submit', runEvalV2);
 
     $('#seed-toggle').addEventListener('change', toggleSeed);
 

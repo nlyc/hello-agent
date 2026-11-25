@@ -79,6 +79,10 @@ def test_static_pages_are_served(console):
     for path, marker in (
         ("/", b"AgentFlow"),
         ("/index.html", b"tab-knowledge"),
+        ("/index.html", b"tab-context"),
+        ("/index.html", b"tab-notes"),
+        ("/index.html", b"tab-protocols"),
+        ("/index.html", b"tab-eval-v2"),
         ("/styles.css", b"--accent"),
         ("/app.js", b"/api/search"),
     ):
@@ -967,3 +971,78 @@ def test_run_file_access_is_restricted(console):
     assert status == 404
     status, _, _ = _request(base, "/api/runs/..%2F..%2Fsecret/rag_eval.md")
     assert status in (400, 404)
+
+
+# ------------------------------------------------------------ v2.0 新页签接口
+
+
+def test_context_build_preview(console):
+    base, _ = console
+    payload = _json(
+        base,
+        "/api/context/build",
+        method="POST",
+        payload={"query": "带父母北京两日游，预算 1500 元", "max_tokens": 1200},
+    )
+    assert payload["stats"]["max_tokens"] == 1200
+    assert "role" in payload["sections"]
+    assert "task" in payload["sections"]
+    assert payload["text"]
+    assert payload["stats"]["packets_selected"] >= 2
+
+
+def test_notes_create_list_delete(console):
+    base, _ = console
+    created = _json(
+        base,
+        "/api/notes/create",
+        method="POST",
+        payload={
+            "title": "测试阻塞",
+            "type": "blocker",
+            "tags": "北京，故宫",
+            "content": "周一闭馆，需改到周二。",
+        },
+    )
+    note_id = created["id"]
+    listing = _json(base, "/api/notes")
+    assert any(note["id"] == note_id for note in listing["notes"])
+    assert listing["summary"]["unresolved_blockers"] >= 1
+
+    deleted = _json(
+        base,
+        "/api/notes/delete",
+        method="POST",
+        payload={"note_id": note_id},
+    )
+    assert deleted["deleted"] is True
+    assert not any(
+        note["id"] == note_id for note in _json(base, "/api/notes")["notes"]
+    )
+
+
+def test_eval_v2_endpoint(console):
+    base, _ = console
+    payload = _json(
+        base,
+        "/api/eval/v2/run",
+        method="POST",
+        payload={"suite": "tool_calling", "limit": 1},
+    )
+    assert payload["returncode"] == 0, payload["output"]
+    assert "[tool_calling]" in payload["output"]
+    assert Path(payload["report"]).exists()
+
+
+def test_mcp_discovery_endpoint(console):
+    base, _ = console
+    payload = _json(base, "/api/protocols/mcp")
+    names = {tool["name"] for tool in payload["tools"]}
+    assert {"get_weather", "get_attraction", "search_notes"} <= names
+
+
+def test_a2a_cards_endpoint(console):
+    base, _ = console
+    payload = _json(base, "/api/protocols/a2a")
+    names = {agent["card"]["name"] for agent in payload["agents"]}
+    assert names == {"资料员", "规划师", "审查员"}

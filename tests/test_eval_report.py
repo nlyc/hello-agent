@@ -24,6 +24,8 @@ from scripts.eval_v2 import (
     build_runner,
     main as eval_main,
 )
+from scripts.eval_online_v2 import build_judge_llm
+from agentflow.llm.openai_compatible import OpenAICompatibleLLM
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -128,3 +130,21 @@ def test_baseline_agents_are_honest():
     assert build_dataset("quality").name == "quality"
     with pytest.raises(KeyError):
         build_dataset("missing")
+
+
+def test_build_judge_llm_falls_back_and_reads_env(monkeypatch):
+    main = OpenAICompatibleLLM(
+        base_url="http://main", api_key="main-key", model="main-model"
+    )
+    judge, manifest = build_judge_llm(main)
+    assert judge is main
+    assert manifest["judge_independent"] is False
+
+    monkeypatch.setenv("EVAL_JUDGE_MODEL", "dev-s-0.62x")
+    monkeypatch.setenv("EVAL_JUDGE_BASE_URL", "http://judge")
+    monkeypatch.setenv("EVAL_JUDGE_API_KEY", "judge-key")
+    judge, manifest = build_judge_llm(main)
+    assert judge.model == "dev-s-0.62x"
+    assert judge.base_url == "http://judge"
+    assert judge.api_key == "judge-key"
+    assert manifest["judge_independent"] is True

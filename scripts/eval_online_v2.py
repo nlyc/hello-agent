@@ -26,6 +26,7 @@ from agentflow.context import (
     RetrievalContextSource,
 )
 from agentflow.core.config import AgentConfig, Config
+from agentflow.core.env import get_env
 from agentflow.evaluation import (
     EvalDataset,
     ItineraryQualityEvaluator,
@@ -118,6 +119,34 @@ def build_llm() -> tuple[OpenAICompatibleLLM, dict[str, Any]]:
     return llm, manifest
 
 
+def build_judge_llm(main_llm: OpenAICompatibleLLM) -> tuple[Any, dict[str, Any]]:
+    """独立 Judge 模型：读取 EVAL_JUDGE_MODEL / BASE_URL / API_KEY。
+
+    未配置时回退主模型，并在 manifest 中标记 ``judge_independent=False``。
+    """
+    model = get_env("EVAL_JUDGE_MODEL", "")
+    if not model:
+        return main_llm, {
+            "judge_model": main_llm.model,
+            "judge_independent": False,
+            "judge_note": "EVAL_JUDGE_MODEL 未配置，使用主模型自评",
+        }
+    base_url = get_env("EVAL_JUDGE_BASE_URL", "") or main_llm.base_url
+    api_key = get_env("EVAL_JUDGE_API_KEY", "") or main_llm.api_key
+    judge = OpenAICompatibleLLM(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        temperature=0.0,
+        timeout=90.0,
+    )
+    return judge, {
+        "judge_model": model,
+        "judge_independent": model != main_llm.model,
+        "judge_note": "",
+    }
+
+
 def build_registry() -> ToolRegistry:
     """S0 工具调用基线：三个本地旅行工具。"""
     registry = ToolRegistry()
@@ -190,9 +219,9 @@ def run_qa(llm, dataset, args) -> list[tuple[str, Any]]:
     return reports
 
 
-def run_quality(llm, dataset, args) -> list[tuple[str, Any]]:
+def run_quality(llm, judge_llm, dataset, args) -> list[tuple[str, Any]]:
     pipeline = build_pipeline()
-    judge = LLMJudge(llm, temperature=0.0)
+    judge = LLMJudge(judge_llm, temperature=0.0)
     reports = []
 
     s0_prompt = (
@@ -270,10 +299,12 @@ def main(argv: list[str] | None = None) -> int:
         else [item.strip() for item in args.suites.split(",") if item.strip()]
     )
     llm, llm_manifest = build_llm()
+    judge_llm, judge_manifest = build_judge_llm(llm)
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     summary: dict[str, Any] = {
         "llm": llm_manifest,
+        "judge": judge_manifest,
         "limit": args.limit,
         "category": args.category,
         "agent": args.agent,
@@ -294,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
         elif suite == "qa":
             reports = run_qa(llm, dataset, args)
         elif suite == "quality":
-            reports = run_quality(llm, dataset, args)
+            reports = run_quality(llm, judge_llm, dataset, args)
         else:
             raise ValueError(f"未知 suite：{suite}")
         for name, report in reports:

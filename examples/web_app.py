@@ -30,9 +30,17 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
+from agentflow.context import (
+    ContextBuilder,
+    ContextConfig,
+    MemoryContextSource,
+    RetrievalContextSource,
+)
 from agentflow.core.config import Config
 from agentflow.llm import OpenAICompatibleLLM
 from agentflow.memory import LongTermMemory, MemoryManager
+from agentflow.notes import NoteContextSource, NoteStore
+from agentflow.protocols.mcp import MCPTool
 from agentflow.retrieval import (
     BM25Index,
     Chunk,
@@ -192,6 +200,7 @@ class WebState:
         self.manifest_path = self.data_dir / "documents.json"
         for directory in (self.uploads_dir, self.knowledge_dir, self.runs_dir):
             directory.mkdir(parents=True, exist_ok=True)
+        self.notes = NoteStore(self.data_dir / "notes", user_id=self.user_id)
 
         self.lock = threading.RLock()
         self.job_lock = threading.Lock()
@@ -1183,6 +1192,155 @@ class WebState:
             self.memory.clear()
             return {"snapshot": self.memory_snapshot()}
 
+    # --- v2.0 上下文 / 笔记 / 协议 / 评估 ---------------------------------
+
+    def build_preview(self, query: Any, max_tokens: Any = 3000) -> dict[str, Any]:
+        """用 ContextBuilder 生成六分区上下文预览。"""
+        text = str(query or "").strip()
+        if not text:
+            raise ApiError("问题不能为空", 400)
+        budget = _clamp_int(max_tokens, 3000, 200, 12000)
+        try:
+            with self.lock:
+                builder = ContextBuilder(
+                    [
+                        MemoryContextSource(self.memory),
+                        RetrievalContextSource(self.pipeline),
+                        NoteContextSource(self.notes),
+                    ],
+                    config=ContextConfig(max_tokens=budget),
+                    role_prompt="你是「智游·山水行」旅行助手。",
+                    output_rules="只基于给定资料回答；资料不足时明确说明。",
+                )
+                built = builder.build(text)
+        except Exception as exc:
+            raise ApiError(f"上下文构建失败：{exc}", 400) from exc
+        return built.to_dict()
+
+    def list_notes(self) -> dict[str, Any]:
+        """返回当前用户的全部笔记与统计。"""
+        with self.lock:
+            return {
+                "notes": [note.to_dict() for note in self.notes.list()],
+                "summary": self.notes.summary(),
+            }
+
+    def create_note(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """新建一条笔记。"""
+        title = str(payload.get("title", "") or "").strip()
+        if not title:
+            raise ApiError("笔记标题不能为空", 400)
+        tags = payload.get("tags") or []
+        if isinstance(tags, str):
+            tags = [part.strip() for part in re.split(r"[,，、]", tags) if part.strip()]
+        try:
+            with self.lock:
+                note = self.notes.create(
+                    title,
+                    str(payload.get("content", "") or ""),
+                    type=str(payload.get("type", "task_state") or "task_state"),
+                    tags=list(tags),
+                )
+        except Exception as exc:
+            raise ApiError(f"创建笔记失败：{exc}", 400) from exc
+        return note.to_dict()
+
+    def delete_note(self, note_id: Any) -> dict[str, Any]:
+        """删除一条笔记。"""
+        identifier = str(note_id or "").strip()
+        if not identifier:
+            raise ApiError("note_id 不能为空", 400)
+        try:
+            with self.lock:
+                deleted = self.notes.delete(identifier)
+        except Exception as exc:
+            raise ApiError(f"删除笔记失败：{exc}", 400) from exc
+        if not deleted:
+            raise ApiError(f"未找到笔记：{identifier}", 404)
+        return {"deleted": True, "note_id": identifier}
+
+    def discover_mcp(self) -> dict[str, Any]:
+        """启动自建旅行 MCP server，发现工具后关闭。"""
+        started = time.perf_counter()
+        mcp = MCPTool(
+            "travel",
+            command=[sys.executable, "-m", "examples.mcp_server_travel"],
+            timeout=30.0,
+            connect_timeout=10.0,
+            agent_name="webui",
+        )
+        try:
+            with self.job_lock:
+                server = mcp.connect()
+                tools = mcp.list_tools()
+        except Exception as exc:
+            raise ApiError(f"MCP 发现失败：{exc}", 502) from exc
+        finally:
+            mcp.close()
+        return {
+            "server": server.get("serverInfo", {}),
+            "tools": tools,
+            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+        }
+
+    def a2a_cards(self) -> dict[str, Any]:
+        """启动三 Agent 的 A2A server，读取 AgentCard 后关闭。"""
+        from examples.demo_a2a_travel import build_servers
+
+        servers = build_servers()
+        try:
+            with self.job_lock:
+                urls = [server.start() for server in servers]
+                agents = [
+                    {"url": url, "card": server.card().to_dict()}
+                    for server, url in zip(servers, urls)
+                ]
+        except Exception as exc:
+            raise ApiError(f"A2A 发现失败：{exc}", 502) from exc
+        finally:
+            for server in servers:
+                server.stop()
+        return {"agents": agents}
+
+    def run_eval_v2(self, suite: Any = "tool_calling", limit: Any = 5) -> dict[str, Any]:
+        """运行离线 v2.0 评估基线，返回子进程输出与报告路径。"""
+        target = str(suite or "tool_calling").strip()
+        if target not in {"tool_calling", "qa", "quality", "all"}:
+            raise ApiError("suite 必须是 tool_calling / qa / quality / all", 400)
+        count = _clamp_int(limit, 5, 1, 100)
+        out_dir = self.data_dir / "eval_v2"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        command = [
+            sys.executable,
+            "scripts/eval_v2.py",
+            "--suite",
+            target,
+            "--limit",
+            str(count),
+            "--out",
+            str(out_dir),
+        ]
+        try:
+            with self.job_lock:
+                completed = subprocess.run(
+                    command,
+                    cwd=str(PROJECT_ROOT),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=180,
+                )
+        except subprocess.TimeoutExpired as exc:
+            raise ApiError("v2 评估超时（>180s）", 504) from exc
+        output = (completed.stdout or "") + (completed.stderr or "")
+        return {
+            "returncode": completed.returncode,
+            "output": output.strip(),
+            "out_dir": str(out_dir),
+            "report": str(out_dir / ("summary.json" if target == "all" else f"{target}.md")),
+        }
+
     # --- 三范式与 Demo ----------------------------------------------------
 
     def run_paradigms(
@@ -1684,6 +1842,15 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/api/tests":
             self._send_json({"tests": state.list_tests()})
             return
+        if method == "GET" and path == "/api/notes":
+            self._send_json(state.list_notes())
+            return
+        if method == "GET" and path == "/api/protocols/mcp":
+            self._send_json(state.discover_mcp())
+            return
+        if method == "GET" and path == "/api/protocols/a2a":
+            self._send_json(state.a2a_cards())
+            return
 
         if method == "POST" and path == "/api/ingest":
             if not isinstance(payload, dict):
@@ -1804,6 +1971,34 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             return
         if method == "POST" and path == "/api/tests/run":
             self._send_json(state.run_tests(str(payload.get("target") or "all")))
+            return
+        if method == "POST" and path == "/api/context/build":
+            if not isinstance(payload, dict):
+                raise ApiError("请求体必须是 JSON 对象")
+            self._send_json(
+                state.build_preview(
+                    payload.get("query"), payload.get("max_tokens", 3000)
+                )
+            )
+            return
+        if method == "POST" and path == "/api/notes/create":
+            if not isinstance(payload, dict):
+                raise ApiError("请求体必须是 JSON 对象")
+            self._send_json(state.create_note(payload))
+            return
+        if method == "POST" and path == "/api/notes/delete":
+            if not isinstance(payload, dict):
+                raise ApiError("请求体必须是 JSON 对象")
+            self._send_json(state.delete_note(payload.get("note_id")))
+            return
+        if method == "POST" and path == "/api/eval/v2/run":
+            if not isinstance(payload, dict):
+                raise ApiError("请求体必须是 JSON 对象")
+            self._send_json(
+                state.run_eval_v2(
+                    payload.get("suite", "tool_calling"), payload.get("limit", 5)
+                )
+            )
             return
 
         if method == "DELETE" and path.startswith("/api/documents/"):
