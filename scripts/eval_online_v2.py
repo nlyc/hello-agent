@@ -140,7 +140,8 @@ def build_registry() -> ToolRegistry:
     registry.register_tool(
         FunctionTool(
             "search_notes",
-            "检索旅行笔记中的事实（开放时间、闭馆、预约、最佳时间等）；用户问具体事实时使用。",
+            "检索旅行笔记中的事实（开放时间、闭馆、预约、最佳时间等）；"
+            "一次只传一个检索词，不要对同一问题并行多个查询变体。",
             search_notes,
             [ToolParameter("query", "string", "检索词", True)],
         )

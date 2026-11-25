@@ -63,6 +63,27 @@ def test_match_calls_multiset():
     result = match_calls(expected, actual)
     assert result["exact_match"] is True
     assert result["matched"] == 2
+    assert result["extra_calls"] == 0
+    assert result["missing_calls"] == 0
+
+
+def test_match_calls_reports_extra_and_missing():
+    expected = [ToolCall.from_text('get_weather(city="北京")')]
+    actual = [
+        ToolCall.from_text('get_weather(city="北京")'),
+        ToolCall.from_text('search_notes(query="北京 景点")'),
+    ]
+    result = match_calls(expected, actual)
+    assert result["exact_match"] is False
+    assert result["matched"] == 1
+    assert result["extra_calls"] == 1
+    assert result["missing_calls"] == 0
+
+    missing = match_calls(
+        expected, [ToolCall.from_text('get_weather(city="上海")')]
+    )
+    assert missing["missing_calls"] == 1
+    assert missing["extra_calls"] == 1
 
 
 def test_evaluate_irrelevance():

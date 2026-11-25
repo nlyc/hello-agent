@@ -239,6 +239,8 @@ def match_calls(
         "expected_count": len(expected),
         "actual_count": len(actual),
         "matched": matched,
+        "missing_calls": max(0, len(expected) - matched),
+        "extra_calls": max(0, len(actual) - matched),
         "exact_match": exact,
     }
 
@@ -259,6 +261,8 @@ def evaluate_tool_calls(
             "expected_count": 0,
             "actual_count": len(actual),
             "matched": 0,
+            "missing_calls": 0,
+            "extra_calls": len(actual),
             "false_positive": not passed,
         }
     result = match_calls(expected, actual, loose_fields=loose_fields)

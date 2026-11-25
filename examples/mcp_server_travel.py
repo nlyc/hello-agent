@@ -44,7 +44,7 @@ def get_attraction(city: str) -> str:
 
 
 def search_notes(query: str) -> str:
-    """检索旅行笔记中的事实（开放时间、闭馆、预约、最佳时间等）；用户问具体事实时使用。"""
+    """检索旅行笔记中的事实（开放时间、闭馆、预约、最佳时间等）；一次只传一个检索词，不要并行多个变体。"""
     text = str(query).strip()
     if not text:
         return "检索词不能为空。"

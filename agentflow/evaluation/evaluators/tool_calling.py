@@ -146,5 +146,11 @@ def _aggregate(results: Iterable[EvalResult]) -> dict[str, Any]:
         "cases": total,
         "passed": passed,
         "accuracy": passed / total if total else 0.0,
+        "extra_calls": sum(
+            int(item.metrics.get("extra_calls", 0)) for item in items
+        ),
+        "missing_calls": sum(
+            int(item.metrics.get("missing_calls", 0)) for item in items
+        ),
         "by_category": dict(sorted(by_category.items())),
     }
