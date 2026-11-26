@@ -235,24 +235,21 @@ class RAGPipeline:
             return ""
         return intro + "\n\n".join(parts) + outro
 
-    def answer(
+    def prepare_hits(
         self,
         question: str,
         *,
-        llm: Any | None = None,
         top_k: int = 5,
         filters: dict[str, Any] | None = None,
-    ) -> RAGAnswer:
-        """基于检索结果回答；``llm`` 为空时使用首条命中的抽取式回答。"""
+    ) -> tuple[list[RetrievalHit], str | None]:
+        """检索并执行地名覆盖校验；返回 ``(hits, 失败说明)``。
+
+        该步骤只读索引，适合在短锁内完成；LLM 生成请用
+        ``answer_from_hits`` 在锁外执行。
+        """
         hits = self.search(question, top_k=top_k, filters=filters)
         if not hits:
-            return RAGAnswer(
-                question=question,
-                answer=NOT_FOUND_ANSWER,
-                citations=[],
-                hits=[],
-                has_answer=False,
-            )
+            return [], NOT_FOUND_ANSWER
         if self.place_guard:
             places = detect_places(question)
             if not places:
@@ -267,25 +264,38 @@ class RAGPipeline:
                 ]
                 if not covered:
                     missing = "、".join(places)
-                    return RAGAnswer(
-                        question=question,
-                        answer=f"知识库暂未收录「{missing}」的相关资料。",
-                        citations=[],
-                        hits=[],
-                        has_answer=False,
-                    )
+                    return [], f"知识库暂未收录「{missing}」的相关资料。"
                 # 只保留提到目标城市的资料，避免混合其它城市的推荐。
                 hits = covered
-        citations = _unique_citations(hits)
+        return hits, None
+
+    def answer_from_hits(
+        self,
+        question: str,
+        hits: Sequence[RetrievalHit],
+        *,
+        llm: Any | None = None,
+    ) -> RAGAnswer:
+        """基于已准备好的检索结果回答（可放在锁外执行 LLM）。"""
+        prepared = list(hits)
+        if not prepared:
+            return RAGAnswer(
+                question=question,
+                answer=NOT_FOUND_ANSWER,
+                citations=[],
+                hits=[],
+                has_answer=False,
+            )
+        citations = _unique_citations(prepared)
         if llm is None:
             return RAGAnswer(
                 question=question,
-                answer=hits[0].text.strip(),
+                answer=prepared[0].text.strip(),
                 citations=citations,
-                hits=hits,
+                hits=prepared,
                 has_answer=True,
             )
-        context = self.build_context(hits)
+        context = self.build_context(prepared)
         messages = [
             {"role": "system", "content": RAG_SYSTEM_PROMPT},
             {
@@ -301,9 +311,31 @@ class RAGPipeline:
             question=question,
             answer=str(answer).strip(),
             citations=citations,
-            hits=hits,
+            hits=prepared,
             has_answer=True,
         )
+
+    def answer(
+        self,
+        question: str,
+        *,
+        llm: Any | None = None,
+        top_k: int = 5,
+        filters: dict[str, Any] | None = None,
+    ) -> RAGAnswer:
+        """基于检索结果回答；``llm`` 为空时使用首条命中的抽取式回答。"""
+        hits, failure = self.prepare_hits(
+            question, top_k=top_k, filters=filters
+        )
+        if failure:
+            return RAGAnswer(
+                question=question,
+                answer=failure,
+                citations=[],
+                hits=[],
+                has_answer=False,
+            )
+        return self.answer_from_hits(question, hits, llm=llm)
 
     def stats(self) -> dict[str, Any]:
         """返回当前索引的简要统计。"""

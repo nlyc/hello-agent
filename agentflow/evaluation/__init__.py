@@ -1,0 +1,76 @@
+"""agentflow.evaluation —— 数据集 / 指标 / 评估器 / 报告 / EvaluationTool。"""
+
+from agentflow.evaluation.dataset import (
+    EvalDataset,
+    iter_jsonl,
+    sha256_file,
+    write_jsonl,
+)
+from agentflow.evaluation.evaluators import (
+    ItineraryQualityEvaluator,
+    QAEvaluator,
+    ToolCallCollector,
+    ToolCallingEvaluator,
+)
+from agentflow.evaluation.metrics import (
+    JudgeResult,
+    LLMJudge,
+    ToolCall,
+    WinRateJudge,
+    as_number,
+    calls_equal,
+    check_itinerary,
+    citation_coverage,
+    containment_match,
+    evaluate_qa,
+    evaluate_tool_calls,
+    extract_final_answer,
+    loose_text_equal,
+    match_calls,
+    normalize_list,
+    normalize_string,
+    parse_judge_output,
+    quasi_exact_match,
+    safe_eval,
+    values_equal,
+)
+from agentflow.evaluation.report import render_report, write_report
+from agentflow.evaluation.tool import EvaluationTool
+from agentflow.evaluation.types import EvalCase, EvalReport, EvalResult
+
+__all__ = [
+    "EvalCase",
+    "EvalDataset",
+    "EvalReport",
+    "EvalResult",
+    "EvaluationTool",
+    "ItineraryQualityEvaluator",
+    "JudgeResult",
+    "LLMJudge",
+    "QAEvaluator",
+    "ToolCall",
+    "ToolCallCollector",
+    "ToolCallingEvaluator",
+    "WinRateJudge",
+    "as_number",
+    "calls_equal",
+    "check_itinerary",
+    "citation_coverage",
+    "containment_match",
+    "evaluate_qa",
+    "evaluate_tool_calls",
+    "extract_final_answer",
+    "iter_jsonl",
+    "loose_text_equal",
+    "match_calls",
+    "normalize_list",
+    "normalize_string",
+    "parse_judge_output",
+    "quasi_exact_match",
+    "render_report",
+    "safe_eval",
+    "sha256_file",
+    "values_equal",
+    "write_jsonl",
+    "write_report",
+]

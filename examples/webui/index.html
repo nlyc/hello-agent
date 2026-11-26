@@ -25,9 +25,13 @@
   <button class="active" data-tab="overview">概览</button>
   <button data-tab="knowledge">知识库 / RAG</button>
   <button data-tab="memory">记忆</button>
+  <button data-tab="context">上下文</button>
+  <button data-tab="notes">笔记</button>
   <button data-tab="paradigms">三范式</button>
+  <button data-tab="protocols">协议</button>
   <button data-tab="demo">完整 Demo</button>
   <button data-tab="eval">RAG 评估</button>
+  <button data-tab="eval-v2">v2 评估</button>
   <button data-tab="tests">测试</button>
 </nav>
 
@@ -398,6 +402,103 @@ py -3.14 -m pytest -q</pre>
     <article class="card">
       <header class="card-head"><h2>运行输出</h2><span id="test-summary" class="muted"></span></header>
       <pre id="test-output" class="terminal">尚未运行测试。</pre>
+    </article>
+  </section>
+  <!-- 上下文 -------------------------------------------------------------->
+  <section id="tab-context" class="panel">
+    <article class="card">
+      <header class="card-head"><h2>上下文构建</h2><span class="muted">ContextBuilder · GSSC · 六分区</span></header>
+      <form id="ctx-form" class="form-row">
+        <label class="field grow">
+          <span>问题</span>
+          <input type="text" id="ctx-query" placeholder="例如：带父母北京两日游，预算 1500" required>
+        </label>
+        <label class="field narrow">
+          <span>Token 预算</span>
+          <input type="number" id="ctx-max" value="3000" min="200" max="12000">
+        </label>
+        <button class="primary-btn" type="submit">构建上下文</button>
+      </form>
+      <p class="hint">从记忆、RAG、笔记三路取料，按相关性 × 新近性选择，输出六分区与预算统计；不调用 LLM。</p>
+      <div id="ctx-stats" class="results"></div>
+      <pre id="ctx-preview" class="terminal">尚未构建。</pre>
+    </article>
+  </section>
+
+  <!-- 笔记 ---------------------------------------------------------------->
+  <section id="tab-notes" class="panel">
+    <div class="grid-2">
+      <article class="card">
+        <header class="card-head"><h2>新建笔记</h2><span class="muted">Markdown + front matter</span></header>
+        <form id="note-form">
+          <div class="form-row">
+            <label class="field grow"><span>标题</span><input type="text" id="note-title" required></label>
+            <label class="field">
+              <span>类型</span>
+              <select id="note-type">
+                <option value="task_state">task_state（阶段进展）</option>
+                <option value="blocker">blocker（阻塞，优先级最高）</option>
+                <option value="action">action（下一步）</option>
+                <option value="conclusion">conclusion（结论）</option>
+                <option value="reference">reference（参考）</option>
+              </select>
+            </label>
+          </div>
+          <label class="field"><span>标签（逗号分隔）</span><input type="text" id="note-tags" placeholder="北京, 故宫"></label>
+          <label class="field"><span>正文</span><textarea id="note-content" rows="6" placeholder="Markdown 正文"></textarea></label>
+          <button class="primary-btn" type="submit">保存笔记</button>
+        </form>
+        <p class="hint">笔记保存在 <span class="mono">.data/webui/notes/&lt;user&gt;/</span>，可手工编辑 Markdown。</p>
+      </article>
+
+      <article class="card">
+        <header class="card-head"><h2>笔记列表</h2><button id="notes-refresh" class="ghost-btn">刷新</button></header>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>类型</th><th>标题</th><th>标签</th><th>更新时间</th><th></th></tr></thead>
+            <tbody id="note-rows"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody>
+          </table>
+        </div>
+        <p id="notes-summary" class="hint"></p>
+      </article>
+    </div>
+  </section>
+
+  <!-- 协议 ---------------------------------------------------------------->
+  <section id="tab-protocols" class="panel">
+    <div class="grid-2">
+      <article class="card">
+        <header class="card-head"><h2>MCP 工具发现</h2><button id="mcp-discover" class="primary-btn">发现工具</button></header>
+        <p class="hint">启动自建旅行 MCP server，读取 <span class="mono">tools/list</span> 后关闭。需要本机 Python 子进程。</p>
+        <div id="mcp-result" class="results"></div>
+      </article>
+      <article class="card">
+        <header class="card-head"><h2>A2A AgentCard</h2><button id="a2a-cards" class="primary-btn">读取卡片</button></header>
+        <p class="hint">启动资料员 / 规划师 / 审查员三个 server，读取 <span class="mono">/.well-known/agent-card.json</span> 后关闭。</p>
+        <div id="a2a-result" class="results"></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- v2 评估 ------------------------------------------------------------->
+  <section id="tab-eval-v2" class="panel">
+    <article class="card">
+      <header class="card-head"><h2>v2.0 评估基线</h2><span class="muted">离线负基线</span></header>
+      <form id="eval-v2-form" class="form-row">
+        <label class="field grow">
+          <span>套件</span>
+          <select id="eval-v2-suite">
+            <option value="all">all</option>
+            <option value="tool_calling">tool_calling</option>
+            <option value="qa">qa</option>
+            <option value="quality">quality</option>
+          </select>
+        </label>
+        <label class="field narrow"><span>limit</span><input type="number" id="eval-v2-limit" value="5" min="1" max="100"></label>
+        <button class="primary-btn" type="submit">运行</button>
+      </form>
+      <p class="hint">运行 <span class="mono">scripts/eval_v2.py</span> 的离线负基线；在线 S0/S1 与组合验证请使用命令行。</p>
+      <pre id="eval-v2-output" class="terminal">尚未运行。</pre>
     </article>
   </section>
 </main>

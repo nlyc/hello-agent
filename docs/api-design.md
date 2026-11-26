@@ -155,10 +155,30 @@ class BaseLLM(ABC):
         json_mode: bool = False,
         tools: Optional[list[dict]] = None,
     ) -> str: ...
+
+    def chat_with_tools(
+        self,
+        messages: Sequence[Any],
+        *,
+        tools: Sequence[dict],
+        temperature: Optional[float] = None,
+    ) -> LLMResponse: ...
+
+@dataclass
+class ToolCallRequest:
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+@dataclass
+class LLMResponse:
+    content: str
+    tool_calls: list[ToolCallRequest]
 ```
 
 - `messages` 每项可为 `Message` 或 OpenAI 风格 dict。
 - `json_mode=True` 要求服务端返回 JSON 对象；`tools` 为原生 function calling 预留。
+- `chat_with_tools` 默认回退到 `chat`（无工具调用），旧实现无需改动；`OpenAICompatibleLLM` 覆盖它返回结构化 `tool_calls`。
 - 所有范式/工作流只依赖此协议，替换实现即可（测试注入 fake 靠它）。
 
 ### 3.2 `OpenAICompatibleLLM(BaseLLM)` — 公司中转站
@@ -168,6 +188,7 @@ class OpenAICompatibleLLM(BaseLLM):
     def __init__(self, base_url=None, api_key=None, model=None, temperature=0.2,
                  timeout=60.0, registry=None, client=None): ...
     def chat(self, messages, *, temperature=None, json_mode=False, tools=None) -> str
+    def chat_with_tools(self, messages, *, tools, temperature=None) -> LLMResponse
     def use_model(self, alias: str) -> None
 ```
 
@@ -304,9 +325,9 @@ class AsyncToolExecutor:
 
 ---
 
-## 5. `agentflow.agents`（三范式）
+## 5. `agentflow.agents`（四范式）
 
-三者构造签名一致地接受 `name / llm / system_prompt / config / memory / tracer`，共享 `run()` 入口与 trace 事件。
+四者构造签名一致地接受 `name / llm / system_prompt / config / memory / tracer / context_builder`，共享 `run()` 入口与 trace 事件。
 
 ### 5.1 `ReActAgent`
 
@@ -344,6 +365,20 @@ class PlanAndSolveAgent(Agent):
 
 - Planner 强制输出 Python 列表（`ast.literal_eval` 解析），Executor 五要素 `{question}{plan}{history}{current_step}`。
 - `custom_prompts` 覆盖 `planner / executor` 模板。
+
+### 5.4 `FunctionCallAgent`
+
+```python
+class FunctionCallAgent(Agent):
+    def __init__(self, name, llm, tools=None, system_prompt=None, config=None,
+                 custom_prompt=None, memory=None, tracer=None,
+                 memory_enabled=None, context_builder=None): ...
+```
+
+- 原生 Function Calling：`ToolRegistry.to_openai_schema()` 生成工具 schema，模型返回结构化 `tool_calls`，无正则解析。
+- 一次响应可返回多个工具调用；每个调用执行后以 `role="tool"` + `tool_call_id` 回填，继续循环。
+- 工具失败转成 `错误: ...` observation，不中断 Agent；超过 `config.agent.max_steps` 抛 `AgentError`。
+- 与 ReAct 共用 `ToolRegistry / memory / trace / context_builder`，区别只在协议层。
 
 ---
 
@@ -786,3 +821,231 @@ class MyLLM(BaseLLM):
 ### 10.5 自定义 Callback
 
 实现 `__call__(self, event: TraceEvent) -> None`，经 `tracer.subscribe(...)` 注册，可加 `event_type/agent_name/filter_fn` 过滤。
+
+---
+
+## 11. `agentflow.context`（v2.0 上下文管线）
+
+### 11.1 `ContextPacket`
+
+```python
+ContextPacket(
+    content: str,
+    timestamp: datetime,          # UTC aware
+    token_count: int = 0,         # <=0 自动估算
+    relevance_score: float = 0.0,
+    source: str = "",
+    section: str = "context",     # role/task/state/evidence/context/output
+    metadata: dict = {},
+    trusted: bool = False,        # 直接用 relevance_score
+    score: float = 0.0,           # 选择阶段写入
+)
+```
+
+### 11.2 `ContextConfig`
+
+`max_tokens / reserve_ratio / min_relevance / relevance_weight / recency_weight / recent_history / memory_limit / rag_limit / note_limit / recency_half_life_hours / min_section_tokens`；两个权重必须和为 1。`ContextConfig.from_env()` 读取 `CONTEXT_*`。
+
+### 11.3 `ContextSource`
+
+```python
+class ContextSource(Protocol):
+    name: str
+    def gather(self, query: str, *, limit: int, now: datetime) -> list[ContextPacket]: ...
+```
+
+实现：`StaticContextSource` / `MemoryContextSource` / `RetrievalContextSource` / `HistoryContextSource`（`NoteContextSource` 在 `agentflow.notes`）。
+
+### 11.4 `ContextBuilder`
+
+```python
+class ContextBuilder:
+    def __init__(
+        self, sources=(), config: ContextConfig | None = None, *,
+        scorer: RelevanceScorer | None = None,
+        compressor: PerSectionCompressor | None = None,
+        template: SectionTemplate | None = None,
+        role_prompt: str = "", output_rules: str = "",
+    ): ...
+    def build(
+        self, task: str, *, history=None,
+        extra_packets: Sequence[ContextPacket] | None = None,
+        now: datetime | None = None,
+    ) -> BuiltContext: ...
+```
+
+`BuiltContext` 暴露 `text`（完整六分区）、`prompt_text`（去掉 Task，供 Agent 注入）、`sections`、`packets`、`stats`、`items`。单源失败写入 `stats["source_errors"]`，不阻断。
+
+### 11.5 Agent 集成
+
+```python
+ReActAgent(..., context_builder=builder)   # Reflection / PlanAndSolve 同理
+```
+
+- `context_builder=None`：完全走 v1.0 `MemoryContext` 路径。
+- 有 builder：`run()` 内构建并 emit `context.build`；失败 emit `context.error` 并降级为空上下文。
+- `memory.record_turn()` 不受影响。
+
+---
+
+## 12. `agentflow.notes`（v2.0 项目式笔记）
+
+### 12.1 `Note`
+
+`id / title / type / tags / created_at / updated_at / content / metadata`；类型：`task_state / conclusion / blocker / action / reference`。
+
+### 12.2 `NoteStore`
+
+```python
+NoteStore(root=None, user_id=None)
+create(title, content="", *, type="task_state", tags=None, note_id=None, metadata=None) -> Note
+read(note_id) -> Note
+update(note_id, *, title=None, content=None, type=None, tags=None, metadata=None) -> Note
+delete(note_id) -> bool
+list(*, note_type=None, tags=None, limit=None) -> list[Note]
+search(query, *, note_type=None, tags=None, limit=10) -> list[Note]
+summary() -> dict
+rebuild_index() -> dict
+```
+
+文件为 `<note_id>.md`，头部 YAML front matter；索引 `notes_index.json`；原子写入；`NOTES_DIR` / `USER_ID` 可配。
+
+### 12.3 `NoteContextSource`
+
+`gather()` 先取全部 blocker，再按 query 搜索，再取 action / task_state；按 id 去重，`trusted=True`，blocker=0.9 / action=0.8 / task_state=0.75 / conclusion=0.7 / reference=0.6。
+
+### 12.4 `NoteTool`
+
+七操作：`create / read / update / search / list / summary / delete`；失败返回 `错误: ...` 字符串。
+
+---
+
+## 13. `agentflow.tools.terminal_tool`（v2.0 JIT）
+
+```python
+TerminalTool(
+    workspace, *, allowed_commands=None, timeout=30.0,
+    max_output_bytes=1_000_000, max_output_chars=20_000, allow_pipes=False,
+)
+```
+
+- `run({"command": "grep -n \"闭馆\" ."})`。
+- 四层安全：白名单 → workspace 沙箱（resolve + relative_to）→ 超时 → 输出截断。
+- 默认 `shell=False`，拒绝 `; & > < ` $ ( )` 等元字符；常用只读命令进程内实现，Windows/Linux 一致。
+- 默认白名单刻意排除 `awk` / `sed`（可执行系统命令或写文件）。
+
+---
+
+## 14. `agentflow.protocols`（v2.0 MCP / A2A）
+
+### 14.1 MCP
+
+```python
+MCPServer(name, version="2.0.0")
+server.add_tool(func, *, name=None, description=None, input_schema=None)
+server.add_resource(uri, *, name="", mime_type="text/plain", description="", content=None, loader=None)
+server.list_resources() / server.read_resource(uri)
+server.add_prompt(name, *, description="", arguments=None, template="", builder=None)
+server.list_prompts() / server.get_prompt(name, arguments=None)
+server.run_stdio()
+
+MCPClient(command=None, *, transport=None, timeout=10.0, cwd=None, env=None)
+client.connect() -> dict
+client.list_tools() -> list[dict]
+client.call_tool(name, arguments=None, *, timeout=None) -> str
+client.list_resources() / client.read_resource(uri)
+client.list_prompts() / client.get_prompt(name, arguments=None)
+client.close()
+
+MCPTool(name, command=None, *, transport=None, timeout=30.0, tracer=None)
+tool.expand() -> list[MCPRemoteTool]
+tool.expand_and_register(registry) -> list[MCPRemoteTool]
+tool.list_resources() / tool.read_resource(uri)
+tool.list_prompts() / tool.get_prompt(name, arguments=None)
+```
+
+- 子集：`initialize / tools/list / tools/call / resources/list / resources/read / prompts/list / prompts/get`；stdio 换行分隔 JSON-RPC 2.0。
+- 包装器名称 `f"{server}_{remote}"`；`inputSchema` → `ToolParameter`；字符串参数按 schema 转换。
+- 失败转 `ToolError`，并发 `mcp.call` Trace。
+
+### 14.2 A2A
+
+```python
+A2AServer(name, description="", *, host="127.0.0.1", port=0, token="", max_body_bytes=1_000_000)
+server.skill(name, description="", *, input_schema=None, output_schema=None)  # 装饰器
+server.start() -> str
+server.stop()
+server.submit_task(skill, payload) -> Task
+server.get_task(task_id) -> Task
+server.cancel_task(task_id) -> Task
+
+A2AClient(url, *, timeout=60.0, token="", poll_interval=0.1)
+client.get_card() -> AgentCard
+client.create_task(skill, payload) -> Task
+client.get_task(task_id) -> Task
+client.cancel_task(task_id) -> Task
+client.execute_skill(skill, payload, *, timeout=None) -> list[Artifact]
+
+A2ATool(url, name=None, *, token="", timeout=60.0, tracer=None)
+```
+
+- 端点：`/.well-known/agent-card.json`、`POST /v1/tasks`、`GET /v1/tasks/{id}`、`POST /v1/tasks/{id}/cancel`。
+- 生命周期：`submitted → working → completed / failed / canceled`，非法迁移抛 `A2AError`。
+- 默认只绑 `127.0.0.1`；可选 Bearer；只用 JSON，绝不 `eval`。
+
+---
+
+## 15. `agentflow.evaluation`（v2.0 评估）
+
+### 15.1 数据集
+
+```python
+EvalDataset.load(path, *, name=None) -> EvalDataset
+dataset.cases: list[EvalCase]
+dataset.filtered(*, category=None, limit=None) -> list[EvalCase]
+```
+
+JSONL 字段：`id / category / question / ground_truth / payload / metadata`。
+
+### 15.2 指标
+
+```python
+ToolCall.from_text('f(a=1, b="x")') -> ToolCall
+evaluate_tool_calls(expected, actual, category="simple", loose_fields=("query",)) -> dict
+extract_final_answer(text) -> str
+quasi_exact_match(pred, gold) -> bool
+evaluate_qa(pred, gold, citations=None, expected_citations=None) -> dict
+LLMJudge(llm).judge(task, answer, reference="") -> JudgeResult
+WinRateJudge(llm).compare(task, a, b) -> dict
+check_itinerary(text, constraints) -> dict
+```
+
+- 结构化参数严格 AST；`loose_fields` 中的自由文本参数（如 `query`）按 token 重叠匹配。
+- `evaluate_tool_calls` 返回 `matched / missing_calls / extra_calls / exact_match / passed`，用于区分漏调与过度调用。
+
+### 15.3 评估器与工具
+
+```python
+ToolCallingEvaluator(agent).run(cases, *, category=None, limit=None) -> EvalReport
+QAEvaluator(answer_fn).run(cases, *, limit=None, category=None) -> EvalReport
+ItineraryQualityEvaluator(agent, judge=None).run(cases, ...) -> EvalReport
+EvaluationTool(runner, suites=(...)).run({"action":"run","suite":"tool_calling"})
+render_report(report) / write_report(report, path)
+```
+
+`EvalReport`：`suite / system / cases / metrics / manifest`；`write_report` 同时写 Markdown 与 JSON。
+
+### 15.4 CLI
+
+```powershell
+py -3.14 scripts/eval_v2.py --suite all --limit 5
+py -3.14 scripts/eval_v2.py --suite tool_calling --category irrelevance
+py -3.14 scripts/eval_v2.py --dry-run
+
+# 在线 S0/S1（需要项目 .env 的 LLM Key）
+py -3.14 scripts/eval_online_v2.py --suites all --limit 3 --out .cache/eval_online_full
+py -3.14 scripts/eval_online_v2.py --suites tool_calling --agent fc --limit 12 --out .cache/eval_online_fc
+
+# S2–S5 组合验证（Notes / MCP / A2A）
+py -3.14 scripts/eval_combo_v2.py --suite all --limit 6 --out .cache/eval_combo_s6
+```

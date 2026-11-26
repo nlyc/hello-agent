@@ -4,10 +4,36 @@ import agentflow
 
 
 def test_version():
-    assert agentflow.__version__ == "1.0.0"
+    assert agentflow.__version__ == "2.0.0"
 
 
 def test_subpackages_importable():
-    from agentflow import agents, core, llm, memory, tools, trace, utils, workflow
+    from agentflow import (
+        agents,
+        context,
+        core,
+        evaluation,
+        llm,
+        memory,
+        notes,
+        protocols,
+        tools,
+        trace,
+        utils,
+        workflow,
+    )
 
-    assert agents and core and llm and memory and tools and trace and utils and workflow
+    assert (
+        agents
+        and context
+        and core
+        and evaluation
+        and llm
+        and memory
+        and notes
+        and protocols
+        and tools
+        and trace
+        and utils
+        and workflow
+    )

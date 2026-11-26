@@ -24,6 +24,9 @@ Action 的格式必须是以下之一：
 # 重要提示:
 - 每次只输出一对 Thought-Action，除 Thought 与 Action 外不要输出任何其他内容
 - Action 必须在同一行，不要换行
+- 只调用完成当前问题所必需的最少工具；不要为了“更全面”额外调用无关工具
+- 只调用用户问题直接需要的工具类别；不要主动查询用户没问的事实
+- 工具参数必须包含用户问题中的关键对象（城市、景点名、日期等），不要遗漏
 - 当收集到足够信息可以回答用户问题时，必须使用 Action: Finish[最终答案] 格式结束
 - Finish 方括号内是完整的最终答案，可以分点、可以换行，但必须完整地放在方括号之内"""
 
@@ -74,7 +77,13 @@ def _parse_tool_call(action_str: str) -> tuple[Optional[str], dict]:
 
 
 def _memory_items_message(memory_context) -> str:
-    """把召回条目拼成一条额外 user 消息；无条目时返回空串。"""
+    """把召回条目拼成一条额外 user 消息；无条目时返回空串。
+
+    ``BuiltContext`` 的 ``text`` 已包含全部条目，再插一条会重复，
+    因此直接跳过。
+    """
+    if getattr(memory_context, "kind", "") == "built":
+        return ""
     items = getattr(memory_context, "items", None) or []
     lines: list[str] = []
     for entry in items:
@@ -103,9 +112,17 @@ class ReActAgent(Agent):
         memory=None,
         tracer=None,
         memory_enabled: Optional[bool] = None,
+        context_builder=None,
     ):
         super().__init__(
-            name, llm, system_prompt, config, memory, tracer, memory_enabled
+            name,
+            llm,
+            system_prompt,
+            config,
+            memory,
+            tracer,
+            memory_enabled,
+            context_builder=context_builder,
         )
         self.tools = tools
         self.custom_prompt = custom_prompt

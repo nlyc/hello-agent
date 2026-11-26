@@ -1,5 +1,6 @@
 """公司中转站实现：统一 OpenAI 兼容接口，换 model 即切换。"""
 
+import json
 from typing import Any, Optional, Sequence
 
 from openai import OpenAI
@@ -7,7 +8,7 @@ from openai import OpenAI
 from agentflow.core.env import get_env
 from agentflow.core.exceptions import LLMError
 from agentflow.core.message import Message
-from agentflow.llm.base import BaseLLM
+from agentflow.llm.base import BaseLLM, LLMResponse, ToolCallRequest
 from agentflow.llm.registry import ModelRegistry
 
 
@@ -98,6 +99,63 @@ class OpenAICompatibleLLM(BaseLLM):
                 except Exception:
                     pass
             raise LLMError(f"调用模型失败: {first_error}") from first_error
+
+    def chat_with_tools(
+        self,
+        messages: Sequence[Any],
+        *,
+        tools: Sequence[dict],
+        temperature: Optional[float] = None,
+    ) -> LLMResponse:
+        """原生 Function Calling：返回文本 + 结构化 tool_calls。"""
+        if not self.api_key:
+            raise LLMError("未配置 LLM_API_KEY")
+        if not tools:
+            return LLMResponse(
+                content=self.chat(messages, temperature=temperature)
+            )
+        payload = [_to_openai_message(m) for m in messages]
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": payload,
+            "temperature": self.temperature if temperature is None else temperature,
+            "stream": False,
+            "tools": list(tools),
+            "tool_choice": "auto",
+        }
+        try:
+            response = self._get_client().chat.completions.create(**kwargs)
+        except Exception as exc:
+            raise LLMError(f"调用模型失败: {exc}") from exc
+
+        message = response.choices[0].message
+        content = str(getattr(message, "content", "") or "").strip()
+        calls: list[ToolCallRequest] = []
+        for call in getattr(message, "tool_calls", None) or []:
+            function = getattr(call, "function", None)
+            name = str(getattr(function, "name", "") or "").strip()
+            if not name:
+                continue
+            raw_arguments = getattr(function, "arguments", "{}")
+            if isinstance(raw_arguments, str):
+                try:
+                    arguments = json.loads(raw_arguments or "{}")
+                except ValueError:
+                    arguments = {"__raw__": raw_arguments}
+            elif isinstance(raw_arguments, dict):
+                arguments = dict(raw_arguments)
+            else:
+                arguments = {}
+            calls.append(
+                ToolCallRequest(
+                    id=str(getattr(call, "id", "") or ""),
+                    name=name,
+                    arguments=arguments if isinstance(arguments, dict) else {},
+                )
+            )
+        if not content and not calls:
+            raise LLMError("模型返回了空内容")
+        return LLMResponse(content=content, tool_calls=calls)
 
     def use_model(self, alias: str) -> None:
         """切换到指定模型：注册表别名解析到 model（+可选 key/base_url），否则当作裸模型名。"""
