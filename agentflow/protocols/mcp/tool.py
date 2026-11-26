@@ -27,7 +27,7 @@ class MCPTool(Tool):
         *,
         transport: Transport | None = None,
         timeout: float = 30.0,
-        connect_timeout: float = 10.0,
+        connect_timeout: float = 30.0,
         tracer=None,
         agent_name: str = "mcp",
         cwd: str | None = None,

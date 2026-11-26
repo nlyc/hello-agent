@@ -45,7 +45,7 @@ class A2AServer:
         name: str,
         description: str = "",
         *,
-        version: str = "2.0.2",
+        version: str = "2.0.3",
         host: str = "127.0.0.1",
         port: int = 0,
         token: str = "",

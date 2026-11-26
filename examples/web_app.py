@@ -1287,7 +1287,7 @@ class WebState:
             "travel",
             command=[sys.executable, "-m", "examples.mcp_server_travel"],
             timeout=30.0,
-            connect_timeout=10.0,
+            connect_timeout=30.0,
             agent_name="webui",
         )
         try:

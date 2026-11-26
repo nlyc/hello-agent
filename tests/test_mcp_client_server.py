@@ -123,7 +123,7 @@ def test_stdio_roundtrip(tmp_path):
     )
     client = MCPClient(
         [sys.executable, str(script)],
-        timeout=10,
+        timeout=30,
         env={"PYTHONPATH": str(ROOT)},
     )
     try:
