@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.request
 
 import pytest
@@ -113,5 +114,41 @@ def test_server_run_rejects_second_start():
     try:
         with pytest.raises(A2AError):
             server.run()
+    finally:
+        server.stop()
+
+
+def test_async_task_streaming():
+    server = A2AServer("流式助手", "测试流式事件", async_mode=True)
+
+    @server.skill("slow", "慢任务")
+    def slow(payload):
+        time.sleep(0.08)
+        return "流式完成"
+
+    url = server.start()
+    try:
+        client = A2AClient(url, timeout=10)
+        task = client.create_task("slow", {})
+        assert task.status.value in ("submitted", "working")
+        events = list(client.stream_events(task.id, timeout=5))
+        assert events
+        assert all(event["type"] == "status" for event in events)
+        final = events[-1]["task"]
+        assert final["status"] == "completed"
+        assert final["artifacts"][0]["content"] == "流式完成"
+    finally:
+        server.stop()
+
+
+def test_sync_task_events_are_replayable():
+    server = make_server()
+    url = server.start()
+    try:
+        client = A2AClient(url, timeout=10)
+        task = client.create_task("gather_facts", {"input": "北京"})
+        assert task.status.value == "completed"
+        events = list(client.stream_events(task.id, timeout=5))
+        assert events[-1]["task"]["status"] == "completed"
     finally:
         server.stop()

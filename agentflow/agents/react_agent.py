@@ -98,6 +98,50 @@ def _memory_items_message(memory_context) -> str:
     return "相关记忆：\n" + "\n".join(lines)
 
 
+_QUERY_FIELDS = ("query", "text", "keyword", "keywords", "search", "prompt")
+
+
+def _normalized_text(text: str) -> str:
+    """去空白与标点，保留 CJK / 字母数字。"""
+    return re.sub(r"[^\w一-鿿]+", "", str(text or "").lower())
+
+
+def _similar_text(left: str, right: str) -> bool:
+    """自由文本相似：归一化包含，或 bigram 召回 >= 0.5。"""
+    a = _normalized_text(left)
+    b = _normalized_text(right)
+    if not a or not b:
+        return a == b
+    if a in b or b in a:
+        return True
+
+    def grams(value: str) -> set[str]:
+        if len(value) < 2:
+            return {value}
+        return {value[index : index + 2] for index in range(len(value) - 1)}
+
+    first, second = grams(a), grams(b)
+    overlap = len(first & second)
+    return (
+        overlap / len(first) >= 0.5
+        and overlap / len(second) >= 0.2
+    )
+
+
+def _same_query(previous: dict, current: dict) -> bool:
+    """判断两次工具调用是否语义重复。"""
+    if set(previous) != set(current):
+        return False
+    for key, value in current.items():
+        past = previous[key]
+        if key in _QUERY_FIELDS and isinstance(value, str) and isinstance(past, str):
+            if not _similar_text(past, value):
+                return False
+        elif past != value:
+            return False
+    return True
+
+
 class ReActAgent(Agent):
     """ReAct 范式：走一步看一步，工具走统一 Registry。"""
 
@@ -113,6 +157,7 @@ class ReActAgent(Agent):
         tracer=None,
         memory_enabled: Optional[bool] = None,
         context_builder=None,
+        deduplicate_tool_calls: bool = True,
     ):
         super().__init__(
             name,
@@ -126,6 +171,7 @@ class ReActAgent(Agent):
         )
         self.tools = tools
         self.custom_prompt = custom_prompt
+        self.deduplicate_tool_calls = bool(deduplicate_tool_calls)
 
     def _build_system_prompt(self) -> str:
         if self.custom_prompt is not None:
@@ -146,6 +192,7 @@ class ReActAgent(Agent):
             messages.append({"role": "user", "content": memory_message})
         messages.append({"role": "user", "content": input_text})
         max_steps = self.config.agent.max_steps
+        executed: list[tuple[str, dict, str]] = []
         for step_no in range(1, max_steps + 1):
             output = self._call_llm(messages, step=step_no).strip()
             output = _truncate_extra_pairs(output)
@@ -187,10 +234,38 @@ class ReActAgent(Agent):
                 messages.append({"role": "user", "content": f"Observation: 错误: 未定义的工具 '{tool_name}'。"})
                 continue
 
+            if self.deduplicate_tool_calls:
+                repeated = next(
+                    (
+                        output
+                        for previous_name, previous_params, output in executed
+                        if previous_name == tool_name
+                        and _same_query(previous_params, params)
+                    ),
+                    None,
+                )
+                if repeated is not None:
+                    observation = f"（重复查询已跳过，复用上次结果）\n{repeated}"
+                    self._emit(
+                        "tool",
+                        step=step_no,
+                        data={
+                            "tool": tool_name,
+                            "params": params,
+                            "output": observation,
+                            "deduplicated": True,
+                        },
+                    )
+                    messages.append(
+                        {"role": "user", "content": f"Observation: {observation}"}
+                    )
+                    continue
+
             try:
                 observation = self.tools.execute(tool_name, params)
             except ToolError as e:
                 observation = f"错误: {e}"
+            executed.append((tool_name, dict(params), observation))
             self._emit(
                 "tool",
                 step=step_no,
