@@ -1,5 +1,9 @@
 """异常体系：分层，便于上层按类型捕获并决定降级策略。"""
 
+from __future__ import annotations
+
+from typing import Any
+
 
 class AgentFlowError(Exception):
     """agentflow 框架所有异常的基类。"""
@@ -23,3 +27,51 @@ class AgentError(AgentFlowError):
 
 class WorkflowError(AgentFlowError):
     """工作流（图）执行失败。"""
+
+
+class RAGError(AgentFlowError):
+    """RAG / 检索层通用异常。"""
+
+
+class RetrievalError(RAGError):
+    """检索过程失败（向量维度非法、索引状态异常等）。"""
+
+
+class EmbeddingMismatchError(RAGError):
+    """向量指纹或维度不一致，需要重建索引。"""
+
+
+class DocumentLoadError(RAGError):
+    """文档加载失败（格式不支持、解析为空、来源不安全等）。
+
+    ``metadata`` 可携带机器可读的失败原因，例如扫描版 PDF 的
+    ``{"needs_ocr": True}``。
+    """
+
+    def __init__(self, message: str, *, metadata: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.metadata: dict[str, Any] = dict(metadata or {})
+
+
+class MemoryError(AgentFlowError):
+    """记忆层读写失败。"""
+
+
+class ContextError(AgentFlowError):
+    """上下文管线构建失败（配置非法、分区非法、预算无法满足等）。"""
+
+
+class NoteError(AgentFlowError):
+    """笔记读写失败（ID 非法、文件损坏、类型非法等）。"""
+
+
+class MCPError(AgentFlowError):
+    """MCP 协议错误（连接、超时、JSON-RPC 错误、工具调用失败等）。"""
+
+
+class A2AError(AgentFlowError):
+    """A2A 协议错误（发现、鉴权、任务生命周期、超时等）。"""
+
+
+class EvaluationError(AgentFlowError):
+    """评估失败（数据集非法、指标无法计算、Judge 输出不可解析等）。"""

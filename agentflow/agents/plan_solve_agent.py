@@ -3,7 +3,7 @@
 import ast
 from typing import Optional
 
-from agentflow.core.agent import Agent
+from agentflow.core.agent import Agent, prepend_memory_text
 from agentflow.core.exceptions import AgentError
 
 PLANNER_TEMPLATE = """你是一个顶级的AI规划专家。你的任务是将用户提出的复杂问题分解成一个由多个简单步骤组成的行动计划。
@@ -48,8 +48,19 @@ class PlanAndSolveAgent(Agent):
         custom_prompts: Optional[dict] = None,
         memory=None,
         tracer=None,
+        memory_enabled: Optional[bool] = None,
+        context_builder=None,
     ):
-        super().__init__(name, llm, system_prompt, config, memory, tracer)
+        super().__init__(
+            name,
+            llm,
+            system_prompt,
+            config,
+            memory,
+            tracer,
+            memory_enabled,
+            context_builder=context_builder,
+        )
         self._templates = {"planner": PLANNER_TEMPLATE, "executor": EXECUTOR_TEMPLATE}
         if custom_prompts:
             self._templates.update(custom_prompts)
@@ -57,11 +68,13 @@ class PlanAndSolveAgent(Agent):
     def _chat(self, prompt: str, step: int = 0) -> str:
         return self._call_llm([{"role": "user", "content": prompt}], step=step).strip()
 
-    def _execute(self, input_text: str, **kwargs) -> str:
-        plan = self._plan(input_text)
+    def _execute(self, input_text: str, memory_context=None, **kwargs) -> str:
+        # 记忆文本同时前置到 planner 与 executor 的 question
+        question = prepend_memory_text(input_text, memory_context)
+        plan = self._plan(question)
         if not plan:
             raise AgentError("规划器未能生成有效计划")
-        return self._execute_plan(input_text, plan)
+        return self._execute_plan(question, plan)
 
     def _plan(self, question: str) -> list[str]:
         prompt = self._templates["planner"].format(question=question)

@@ -1,0 +1,9 @@
+{"id": "qa_01", "question": "故宫周几闭馆？", "gold_chunk_ids": ["chunk_c492627a87bd4d73"], "gold_answer": "周一闭馆", "city": "北京", "tags": ["single_hop"]}
+{"id": "qa_02", "question": "颐和园适合爬坡吗？", "gold_chunk_ids": ["chunk_057f942b7ff24a2d"], "gold_answer": "适合不爬坡的游客", "city": "北京", "tags": ["single_hop"]}
+{"id": "qa_03", "question": "北京下雨天可以去哪些室内景点？", "gold_chunk_ids": ["chunk_3c0ee3d8b6ca197e"], "gold_answer": "中国国家博物馆", "city": "北京", "tags": ["single_hop"]}
+{"id": "qa_04", "question": "香山红叶什么时候最好看？", "gold_chunk_ids": ["chunk_a7dc84813cba66a7"], "gold_answer": "十月中旬到十一月初", "city": "北京", "tags": ["single_hop"]}
+{"id": "qa_05", "question": "外滩夜景几点最好？", "gold_chunk_ids": ["chunk_da6a5fcd8f18407b"], "gold_answer": "晚上七点至九点", "city": "上海", "tags": ["single_hop"]}
+{"id": "qa_06", "question": "上海雨天适合去哪里？", "gold_chunk_ids": ["chunk_3429f21bf4a8211f"], "gold_answer": "上海博物馆", "city": "上海", "tags": ["single_hop"]}
+{"id": "qa_07", "question": "西湖适合骑行吗？", "gold_chunk_ids": ["chunk_e09f1372fdd42243"], "gold_answer": "适合环湖骑行", "city": "杭州", "tags": ["single_hop"]}
+{"id": "qa_08", "question": "成都大熊猫基地什么时候去最好？", "gold_chunk_ids": ["chunk_7ebe009c2bd12879"], "gold_answer": "早上开园时前往", "city": "成都", "tags": ["single_hop"]}
+{"id": "qa_09", "question": "都江堰雨天能去吗？", "gold_chunk_ids": ["chunk_7165131a7378cac8"], "gold_answer": "改期", "city": "成都", "tags": ["single_hop"]}

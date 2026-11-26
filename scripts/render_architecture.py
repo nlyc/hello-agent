@@ -93,7 +93,7 @@ def build() -> Image.Image:
     f_legend = _font(16)
 
     # 标题
-    center_text(d, W / 2, 46, "agentflow · 自研智能体框架 v1.0 —— 分层架构", f_title)
+    center_text(d, W / 2, 46, "agentflow · 自研智能体框架 —— 分层架构（M8 记忆 + 检索）", f_title)
 
     # ---- 应用层 ----
     draw_layer(d, "应用层 · 案例", 90, 170, C_APP_BG)
@@ -131,10 +131,11 @@ def build() -> Image.Image:
         ("core/", "Message · Config\nAgent基类 · exceptions"),
         ("llm/", "BaseLLM · OpenAI兼容\n模型注册表"),
         ("tools/", "Tool · Registry热插拔\nChain · async"),
-        ("memory/", "MessageHistory\nBaseMemory · 持久化"),
+        ("memory/", "MessageHistory · 工作记忆\n长期记忆 · MemoryManager"),
+        ("retrieval/", "加载 · 分块 · BM25\n向量库 · RRF · Pipeline"),
         ("trace/", "TraceEvent · Tracer\n回调订阅"),
     ]
-    bx, bw, gap = 100, 176, 14
+    bx, bw, gap = 100, 142, 12
     for i, (name, sub) in enumerate(base):
         x = bx + i * (bw + gap)
         sub_lines = [(ln, f_sub) for ln in sub.split("\n")]
@@ -155,13 +156,15 @@ def build() -> Image.Image:
     arrow(d, 575, 670, 575, 720)  # 基础层 → utils
 
     # 数据流标注：右侧面板
-    px, py, pw, ph = 1140, 90, 380, 500
+    px, py, pw, ph = 1140, 90, 380, 560
     d.rounded_rectangle([px, py, px + pw, py + ph], radius=16, fill=(250, 250, 250), outline=(207, 216, 220), width=2)
     d.text((px + 24, py + 20), "数据流标注", font=f_legend_title, fill=C_LAYER_LABEL)
 
     legends = [
         ("trace 贯穿全链路", "Agent / Workflow 每个关键动作 emit 事件，\n经 Tracer 订阅回调，落盘 JSONL / 统计。"),
-        ("memory 读写", "MessageHistory 管理上下文；\nBaseMemory 可插拔持久化，支持 as_tool 桥接。"),
+        ("memory 工作记忆", "MessageHistory 管理上下文；WorkingMemory\n窗口 + TTL 生成会话内摘要。"),
+        ("memory 长期记忆", "LongTermMemory（SQLite 向量库）跨会话读写，\nMemoryManager 每轮 build_context 注入三范式。"),
+        ("RAG 链路", "加载/分块 → Embedder → 向量库 + BM25\n→ RRF 融合 → RAGPipeline 带引用回答。"),
         ("模型切换", "同一公司中转站（OpenAI 兼容），\n换 model 名即切换 DeepSeek / GLM / OpenAI。"),
     ]
     ly = py + 70
@@ -175,8 +178,8 @@ def build() -> Image.Image:
 
     # 底部依赖说明
     caption = (
-        "依赖关系：agents/ 依赖 core · llm · tools · memory · trace；"
-        "workflow/ 依赖 core · llm · tools · trace；底层统一依赖 utils/"
+        "依赖关系：agents/ 依赖 core · llm · tools · memory · retrieval · trace；"
+        "workflow/ 依赖 core · llm · tools · trace；memory/ 依赖 retrieval/；底层统一依赖 utils/"
     )
     cw = text_w(d, caption, f_cap)
     d.text(((W - cw) / 2, H - 44), caption, font=f_cap, fill=C_CAPTION)

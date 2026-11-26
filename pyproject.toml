@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentflow"
-version = "1.0.0"
-description = "自研智能体框架 v1.0：三种范式 + 低代码工作流 + 可替换 Model Layer + 工具热插拔/记忆/Trace"
+version = "2.0.0"
+description = "自研智能体框架 v2.0：三范式 + 工作流 + 上下文管线（ContextBuilder/Note/Terminal）+ MCP/A2A + 评估闭环"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -16,6 +16,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# 语义向量后端（可选）；默认离线使用 HashingEmbedder，不安装本 extras 也能运行。
+embed = ["fastembed>=0.9,<1.0"]
+# PDF / Word 文档解析（可选）；不安装时 .txt/.md/URL 仍可正常使用。
+rag = ["pypdf>=5.0", "python-docx>=1.1"]
+# Qdrant 远程向量库（可选）；默认使用 SQLite 本地向量库。
+qdrant = ["qdrant-client>=1.12"]
 
 [tool.setuptools.packages.find]
 include = ["agentflow*"]
