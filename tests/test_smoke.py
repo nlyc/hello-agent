@@ -4,7 +4,7 @@ import agentflow
 
 
 def test_version():
-    assert agentflow.__version__ == "2.0.0"
+    assert agentflow.__version__ == "2.0.1"
 
 
 def test_subpackages_importable():

@@ -951,7 +951,7 @@ TerminalTool(
 ### 14.1 MCP
 
 ```python
-MCPServer(name, version="2.0.0")
+MCPServer(name, version="2.0.1")
 server.add_tool(func, *, name=None, description=None, input_schema=None)
 server.add_resource(uri, *, name="", mime_type="text/plain", description="", content=None, loader=None)
 server.list_resources() / server.read_resource(uri)

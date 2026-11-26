@@ -86,7 +86,7 @@ class AgentCard:
     name: str
     description: str = ""
     url: str = ""
-    version: str = "2.0.0"
+    version: str = "2.0.1"
     skills: list[Skill] = field(default_factory=list)
     capabilities: dict[str, Any] = field(default_factory=dict)
 
@@ -106,7 +106,7 @@ class AgentCard:
             name=str(data.get("name", "")),
             description=str(data.get("description", "")),
             url=str(data.get("url", "")),
-            version=str(data.get("version", "2.0.0")),
+            version=str(data.get("version", "2.0.1")),
             skills=[Skill.from_dict(item) for item in data.get("skills", []) or []],
             capabilities=dict(data.get("capabilities", {}) or {}),
         )

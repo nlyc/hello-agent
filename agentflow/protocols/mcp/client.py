@@ -222,7 +222,7 @@ class MCPClient:
             {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "agentflow", "version": "2.0.0"},
+                "clientInfo": {"name": "agentflow", "version": "2.0.1"},
             },
             timeout=self.timeout,
         )
