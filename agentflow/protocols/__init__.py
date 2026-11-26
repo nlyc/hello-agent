@@ -13,6 +13,8 @@ from agentflow.protocols.a2a import (
 from agentflow.protocols.mcp import (
     InMemoryTransport,
     MCPClient,
+    MCPHttpServer,
+    MCPHttpTransport,
     MCPRemoteTool,
     MCPServer,
     MCPTool,
@@ -28,6 +30,8 @@ __all__ = [
     "Artifact",
     "InMemoryTransport",
     "MCPClient",
+    "MCPHttpServer",
+    "MCPHttpTransport",
     "MCPRemoteTool",
     "MCPServer",
     "MCPTool",

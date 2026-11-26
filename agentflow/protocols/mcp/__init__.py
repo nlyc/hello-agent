@@ -7,6 +7,8 @@ from agentflow.protocols.mcp.client import (
     Transport,
     stdio_command,
 )
+from agentflow.protocols.mcp.http_client import MCPHttpTransport
+from agentflow.protocols.mcp.http_server import MCPHttpServer
 from agentflow.protocols.mcp.jsonrpc import (
     PROTOCOL_VERSION,
     JsonRpcError,
@@ -28,6 +30,8 @@ __all__ = [
     "InMemoryTransport",
     "JsonRpcError",
     "MCPClient",
+    "MCPHttpServer",
+    "MCPHttpTransport",
     "MCPRemoteTool",
     "MCPServer",
     "MCPTool",

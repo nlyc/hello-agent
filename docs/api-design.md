@@ -958,6 +958,11 @@ server.list_resources() / server.read_resource(uri)
 server.add_prompt(name, *, description="", arguments=None, template="", builder=None)
 server.list_prompts() / server.get_prompt(name, arguments=None)
 server.run_stdio()
+server.run_http(host="127.0.0.1", port=8000)
+
+MCPHttpServer(server, *, host="127.0.0.1", port=0, token="", max_body_bytes=1_000_000)
+http.start() -> str                 # http://host:port/mcp
+http.stop()
 
 MCPClient(command=None, *, transport=None, timeout=10.0, cwd=None, env=None)
 client.connect() -> dict
@@ -967,6 +972,8 @@ client.list_resources() / client.read_resource(uri)
 client.list_prompts() / client.get_prompt(name, arguments=None)
 client.close()
 
+MCPHttpTransport(url, *, timeout=30.0, token="")   # POST JSON-RPC 到 /mcp
+
 MCPTool(name, command=None, *, transport=None, timeout=30.0, tracer=None)
 tool.expand() -> list[MCPRemoteTool]
 tool.expand_and_register(registry) -> list[MCPRemoteTool]
@@ -974,7 +981,9 @@ tool.list_resources() / tool.read_resource(uri)
 tool.list_prompts() / tool.get_prompt(name, arguments=None)
 ```
 
-- 子集：`initialize / tools/list / tools/call / resources/list / resources/read / prompts/list / prompts/get`；stdio 换行分隔 JSON-RPC 2.0。
+- 子集：`initialize / tools/list / tools/call / resources/list / resources/read / prompts/list / prompts/get`。
+- 传输：stdio（换行分隔 JSON-RPC 2.0）、HTTP（`POST /mcp`）、SSE 握手（`GET /mcp/sse`）。
+- HTTP 服务默认只绑定 `127.0.0.1`，支持可选 Bearer Token 与请求体上限。
 - 包装器名称 `f"{server}_{remote}"`；`inputSchema` → `ToolParameter`；字符串参数按 schema 转换。
 - 失败转 `ToolError`，并发 `mcp.call` Trace。
 

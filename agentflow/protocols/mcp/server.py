@@ -263,6 +263,14 @@ class MCPServer:
             }
         raise JsonRpcError(METHOD_NOT_FOUND, f"未知方法：{method}")
 
+    def run_http(
+        self, host: str = "127.0.0.1", port: int = 8000
+    ) -> None:
+        """以 HTTP/SSE 方式运行（阻塞）。"""
+        from agentflow.protocols.mcp.http_server import MCPHttpServer
+
+        MCPHttpServer(self, host=host, port=port).run()
+
     def run_stdio(self) -> None:
         """从 stdin 逐行读取 JSON-RPC，向 stdout 写响应。"""
         for raw in sys.stdin.buffer:

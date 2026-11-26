@@ -84,9 +84,33 @@ def build_server() -> MCPServer:
     return server
 
 
-def main() -> int:
-    """以 stdio 方式运行。"""
-    build_server().run_stdio()
+def main(argv: list[str] | None = None) -> int:
+    """默认 stdio；``--http`` 时启动 HTTP/SSE 服务。"""
+    import argparse
+    import time
+
+    from agentflow.protocols.mcp import MCPHttpServer
+
+    parser = argparse.ArgumentParser(description="旅行 MCP server")
+    parser.add_argument("--http", action="store_true", help="使用 HTTP/SSE 传输")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8765)
+    args = parser.parse_args(argv)
+
+    server = build_server()
+    if not args.http:
+        server.run_stdio()
+        return 0
+
+    http = MCPHttpServer(server, host=args.host, port=args.port)
+    url = http.start()
+    print(f"MCP HTTP endpoint: {url}", flush=True)
+    print(f"MCP SSE endpoint:  {url.rsplit('/mcp', 1)[0]}/mcp/sse", flush=True)
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        http.stop()
     return 0
 
 

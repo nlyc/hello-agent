@@ -23,7 +23,7 @@ v2.0 在 v1.0 与 M8 记忆/RAG 之上新增：
 | `retrieval` | 文档加载（txt/md/pdf/docx/URL）/ 标题感知分块 / Embedder / BM25 / SQLite·Qdrant / RRF 混合检索 / RAGPipeline |
 | `context` | 上下文管线：GSSC / 六分区 / ContextPacket / Memory·RAG·History Source / 预算压缩 |
 | `notes` | 项目式笔记：Markdown + YAML front matter / notes_index.json / 五类型 / NoteContextSource |
-| `protocols` | MCP（JSON-RPC over stdio；Tools / Resources / Prompts + MCPTool 自动展开）/ A2A（AgentCard/Task/Artifact + A2ATool + SSE 任务事件） |
+| `protocols` | MCP（stdio + HTTP/SSE；Tools / Resources / Prompts + MCPTool 自动展开）/ A2A（AgentCard/Task/Artifact + A2ATool + SSE 任务事件） |
 | `evaluation` | 数据集 / AST 工具调用 / QEM / LLM Judge / Win Rate / 报告与 EvaluationTool |
 | `trace` | 全链路 Trace 回调（TraceEvent / Tracer / 订阅） |
 | `workflow` | 低代码工作流（自研轻量 StateGraph，不依赖 LangGraph） |
@@ -56,6 +56,9 @@ py -3.14 -m examples.demo_context_engineering --out .cache/context_demo
 
 # v2.0：MCP 发现 → 展开 → 注册 → Agent 调用（离线）
 py -3.14 -m examples.demo_mcp_travel
+
+# v2.0：MCP HTTP/SSE server（默认 127.0.0.1:8765；另开终端）
+py -3.14 -m examples.mcp_server_travel --http --port 8765
 
 # v2.0：A2A 三 Agent 协作（离线）
 py -3.14 -m examples.demo_a2a_travel --out .cache/a2a_demo
@@ -142,7 +145,7 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 |---|---|---|
 | D1 | 代码仓库（零外部框架依赖） | 本仓库 |
 | D2 | 架构图（Mermaid + PNG） | [`docs/architecture.md`](docs/architecture.md) + [`docs/architecture.png`](docs/architecture.png) |
-| D3 | 单元测试（454 个通过 / 4 跳过，全绿） | [`tests/`](tests/) |
+| D3 | 单元测试（456 个通过 / 4 跳过，全绿） | [`tests/`](tests/) |
 | D4 | 端到端演示 | [`examples/demo_e2e.py`](examples/demo_e2e.py) |
 | D5 | API 设计文档 | [`docs/api-design.md`](docs/api-design.md) |
 | D6 | 三范式轨迹对比报告 | [`docs/trajectory-comparison.md`](docs/trajectory-comparison.md) |
