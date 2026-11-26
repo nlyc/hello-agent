@@ -173,6 +173,7 @@ def build_registry() -> ToolRegistry:
             "一次只传一个检索词，不要对同一问题并行多个查询变体。",
             search_notes,
             [ToolParameter("query", "string", "检索词", True)],
+            max_calls_per_run=1,
         )
     )
     return registry
@@ -195,11 +196,17 @@ def _select_cases(dataset, args):
 def run_tool_calling(llm, dataset, args) -> list[tuple[str, Any]]:
     agent_cls = FunctionCallAgent if args.agent == "fc" else ReActAgent
     label = "S0_fc" if args.agent == "fc" else "S0_react"
+    max_tool_calls = (
+        None
+        if getattr(args, "max_tool_calls", 2) <= 0
+        else int(getattr(args, "max_tool_calls", 2))
+    )
     agent = agent_cls(
         name=f"online-{args.agent}",
         llm=llm,
         tools=build_registry(),
         config=Config(agent=AgentConfig(max_steps=8)),
+        max_tool_calls=max_tool_calls,
     )
     report = ToolCallingEvaluator(agent).run(
         _select_cases(dataset, args),
@@ -298,6 +305,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--limit", type=int, default=3, help="每个系统样本上限")
     parser.add_argument("--offset", type=int, default=0, help="样本起始偏移，便于分批")
+    parser.add_argument(
+        "--max-tool-calls",
+        type=int,
+        default=2,
+        help="工具调用总预算；<=0 表示不限制（默认 2，对应 mini-BFCL 最大期望调用数）",
+    )
     parser.add_argument("--category", default=None, help="类别过滤")
     parser.add_argument(
         "--agent",
@@ -324,6 +337,7 @@ def main(argv: list[str] | None = None) -> int:
         "offset": args.offset,
         "category": args.category,
         "agent": args.agent,
+        "max_tool_calls": args.max_tool_calls,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "reports": {},
     }

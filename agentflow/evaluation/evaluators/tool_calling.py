@@ -25,6 +25,9 @@ class ToolCallCollector:
     def __call__(self, event: TraceEvent) -> None:
         if event.type != "tool":
             return
+        # 预算/去重跳过也会发 tool 事件；它们不是实际执行，不能计入调用集合。
+        if event.data.get("budget_exhausted") or event.data.get("deduplicated"):
+            return
         name = str(event.data.get("tool", "") or "")
         params = event.data.get("params", {}) or {}
         if name:

@@ -43,6 +43,7 @@ class FunctionCallAgent(Agent):
         tracer=None,
         memory_enabled: Optional[bool] = None,
         context_builder=None,
+        max_tool_calls: Optional[int] = None,
     ):
         super().__init__(
             name,
@@ -56,6 +57,7 @@ class FunctionCallAgent(Agent):
         )
         self.tools = tools
         self.custom_prompt = custom_prompt
+        self.max_tool_calls = max_tool_calls
 
     def _build_system_prompt(self) -> str:
         if self.custom_prompt is not None:
@@ -77,6 +79,8 @@ class FunctionCallAgent(Agent):
         ]
         schemas = self.tools.to_openai_schema()
         max_steps = self.config.agent.max_steps
+        tool_counts: dict[str, int] = {}
+        total_tool_calls = 0
         for step_no in range(1, max_steps + 1):
             response = self.llm.chat_with_tools(
                 messages, tools=schemas, temperature=0.0
@@ -97,10 +101,42 @@ class FunctionCallAgent(Agent):
 
             messages.append(response.to_assistant_message())
             for call in response.tool_calls:
+                budget_hit = False
                 try:
-                    observation = self.tools.execute(call.name, call.arguments)
+                    tool = self.tools.get(call.name)
                 except ToolError as exc:
                     observation = f"错误: {exc}"
+                else:
+                    cap = getattr(tool, "max_calls_per_run", None)
+                    if (
+                        self.max_tool_calls is not None
+                        and total_tool_calls >= self.max_tool_calls
+                    ):
+                        observation = (
+                            f"（本次任务工具调用上限 {self.max_tool_calls} 次，"
+                            "已跳过该调用；请基于已有信息回答）"
+                        )
+                        budget_hit = True
+                    elif (
+                        cap is not None
+                        and tool_counts.get(call.name, 0) >= cap
+                    ):
+                        observation = (
+                            f"（工具 {call.name} 每次任务最多调用 {cap} 次，"
+                            "已跳过该调用；请基于已有信息回答）"
+                        )
+                        budget_hit = True
+                    else:
+                        try:
+                            observation = self.tools.execute(
+                                call.name, call.arguments
+                            )
+                        except ToolError as exc:
+                            observation = f"错误: {exc}"
+                        tool_counts[call.name] = (
+                            tool_counts.get(call.name, 0) + 1
+                        )
+                        total_tool_calls += 1
                 self._emit(
                     "tool",
                     step=step_no,
@@ -109,6 +145,7 @@ class FunctionCallAgent(Agent):
                         "params": call.arguments,
                         "output": observation,
                         "call_id": call.id,
+                        "budget_exhausted": budget_hit,
                     },
                 )
                 messages.append(

@@ -1,5 +1,7 @@
 # agentflow · 自研智能体框架 v2.0
 
+[![CI](https://github.com/nlyc/hello-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/nlyc/hello-agent/actions/workflows/ci.yml)
+
 统一承载三种 Agent 范式（ReAct / Reflection / Plan-and-Solve）、低代码工作流、可替换 Model Layer，
 并提供**工具热插拔、Context/Memory 管理、全链路 Trace 回调**三大新能力。
 
@@ -140,7 +142,7 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 |---|---|---|
 | D1 | 代码仓库（零外部框架依赖） | 本仓库 |
 | D2 | 架构图（Mermaid + PNG） | [`docs/architecture.md`](docs/architecture.md) + [`docs/architecture.png`](docs/architecture.png) |
-| D3 | 单元测试（451 个通过 / 4 跳过，全绿） | [`tests/`](tests/) |
+| D3 | 单元测试（454 个通过 / 4 跳过，全绿） | [`tests/`](tests/) |
 | D4 | 端到端演示 | [`examples/demo_e2e.py`](examples/demo_e2e.py) |
 | D5 | API 设计文档 | [`docs/api-design.md`](docs/api-design.md) |
 | D6 | 三范式轨迹对比报告 | [`docs/trajectory-comparison.md`](docs/trajectory-comparison.md) |

@@ -158,6 +158,7 @@ class ReActAgent(Agent):
         memory_enabled: Optional[bool] = None,
         context_builder=None,
         deduplicate_tool_calls: bool = True,
+        max_tool_calls: Optional[int] = None,
     ):
         super().__init__(
             name,
@@ -172,6 +173,7 @@ class ReActAgent(Agent):
         self.tools = tools
         self.custom_prompt = custom_prompt
         self.deduplicate_tool_calls = bool(deduplicate_tool_calls)
+        self.max_tool_calls = max_tool_calls
 
     def _build_system_prompt(self) -> str:
         if self.custom_prompt is not None:
@@ -193,6 +195,8 @@ class ReActAgent(Agent):
         messages.append({"role": "user", "content": input_text})
         max_steps = self.config.agent.max_steps
         executed: list[tuple[str, dict, str]] = []
+        tool_counts: dict[str, int] = {}
+        total_tool_calls = 0
         for step_no in range(1, max_steps + 1):
             output = self._call_llm(messages, step=step_no).strip()
             output = _truncate_extra_pairs(output)
@@ -261,10 +265,54 @@ class ReActAgent(Agent):
                     )
                     continue
 
+            if self.max_tool_calls is not None and total_tool_calls >= self.max_tool_calls:
+                observation = (
+                    f"（本次任务工具调用上限 {self.max_tool_calls} 次，"
+                    "已跳过该调用；请基于已有信息回答）"
+                )
+                self._emit(
+                    "tool",
+                    step=step_no,
+                    data={
+                        "tool": tool_name,
+                        "params": params,
+                        "output": observation,
+                        "budget_exhausted": True,
+                    },
+                )
+                messages.append(
+                    {"role": "user", "content": f"Observation: {observation}"}
+                )
+                continue
+
+            tool = self.tools.get(tool_name)
+            cap = getattr(tool, "max_calls_per_run", None)
+            if cap is not None and tool_counts.get(tool_name, 0) >= cap:
+                observation = (
+                    f"（工具 {tool_name} 每次任务最多调用 {cap} 次，"
+                    "已跳过该调用；请基于已有信息回答）"
+                )
+                self._emit(
+                    "tool",
+                    step=step_no,
+                    data={
+                        "tool": tool_name,
+                        "params": params,
+                        "output": observation,
+                        "budget_exhausted": True,
+                    },
+                )
+                messages.append(
+                    {"role": "user", "content": f"Observation: {observation}"}
+                )
+                continue
+
             try:
                 observation = self.tools.execute(tool_name, params)
             except ToolError as e:
                 observation = f"错误: {e}"
+            tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
+            total_tool_calls += 1
             executed.append((tool_name, dict(params), observation))
             self._emit(
                 "tool",

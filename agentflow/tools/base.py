@@ -19,9 +19,17 @@ class ToolParameter:
 class Tool(ABC):
     """工具基类：run(parameters) -> str 统一执行 + get_parameters() 自描述。"""
 
-    def __init__(self, name: str, description: str = ""):
+    def __init__(
+        self,
+        name: str,
+        description: str = "",
+        *,
+        max_calls_per_run: int | None = None,
+    ):
         self.name = name
         self.description = description
+        # 单次 Agent 运行内允许调用该工具的最大次数；None 表示不限制。
+        self.max_calls_per_run = max_calls_per_run
 
     @abstractmethod
     def run(self, parameters: dict[str, Any]) -> str:
@@ -76,8 +84,12 @@ class FunctionTool(Tool):
         description: str,
         func: Callable[..., Any],
         parameters: Optional[list[ToolParameter]] = None,
+        *,
+        max_calls_per_run: int | None = None,
     ):
-        super().__init__(name, description)
+        super().__init__(
+            name, description, max_calls_per_run=max_calls_per_run
+        )
         self._func = func
         self._parameters = parameters or [
             ToolParameter(name="input", type="string", required=True)

@@ -8,6 +8,7 @@ from agentflow.core.exceptions import EvaluationError
 from agentflow.evaluation import (
     EvalCase,
     ToolCall,
+    ToolCallCollector,
     ToolCallingEvaluator,
     calls_equal,
     evaluate_tool_calls,
@@ -15,6 +16,7 @@ from agentflow.evaluation import (
     match_calls,
     safe_eval,
 )
+from agentflow.trace.event import TraceEvent
 
 
 def test_parse_call_and_safe_eval():
@@ -135,6 +137,24 @@ def test_evaluate_tool_calls_with_loose_fields():
     assert evaluate_tool_calls(
         expected, actual, loose_fields=["query"]
     )["passed"]
+
+
+def test_collector_ignores_budget_and_dedupe_events():
+    collector = ToolCallCollector()
+    collector(
+        TraceEvent(
+            type="tool",
+            data={"tool": "x", "params": {}, "budget_exhausted": True},
+        )
+    )
+    collector(
+        TraceEvent(
+            type="tool",
+            data={"tool": "x", "params": {}, "deduplicated": True},
+        )
+    )
+    collector(TraceEvent(type="tool", data={"tool": "x", "params": {}}))
+    assert len(collector.calls) == 1
 
 
 class FakeAgent:

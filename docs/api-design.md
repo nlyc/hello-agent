@@ -249,7 +249,8 @@ class ToolParameter:
 
 ```python
 class Tool(ABC):
-    def __init__(self, name: str, description: str = ""): ...
+    def __init__(self, name: str, description: str = "", *,
+                 max_calls_per_run: int | None = None): ...
     @abstractmethod
     def run(self, parameters: dict) -> str: ...
     def get_parameters(self) -> list[ToolParameter]     # 默认 []
@@ -258,11 +259,14 @@ class Tool(ABC):
     def to_openai_schema(self) -> dict                  # OpenAI function calling schema
 ```
 
+- `max_calls_per_run`：单次 Agent 运行内该工具的最大调用次数；`None` 不限制。
+
 ### 4.3 `FunctionTool(Tool)`
 
 ```python
 class FunctionTool(Tool):
-    def __init__(self, name, description, func, parameters=None): ...
+    def __init__(self, name, description, func, parameters=None, *,
+                 max_calls_per_run=None): ...
 ```
 
 - `func` 的形参名须与 `parameters` 的 `name` 一致；缺省 `parameters` 时使用单个 `input` 参数。
@@ -334,12 +338,16 @@ class AsyncToolExecutor:
 ```python
 class ReActAgent(Agent):
     def __init__(self, name, llm, tools=None, system_prompt=None, config=None,
-                 custom_prompt=None, memory=None, tracer=None): ...
+                 custom_prompt=None, memory=None, tracer=None,
+                 context_builder=None, deduplicate_tool_calls=True,
+                 max_tool_calls=None): ...
 ```
 
 - 循环：Thought → Action → Observation；**Finish 检查先于工具查找**。
 - `Action` 格式：`function_name(arg="value")` 或 `Finish[最终答案]`；支持全角冒号。
 - `max_steps` 来自 `config.agent.max_steps`，超限抛 `AgentError`。
+- `deduplicate_tool_calls`：同工具 + 语义相似 query 复用上次结果。
+- `max_tool_calls`：单次运行工具调用总预算；`None` 不限制。
 - `custom_prompt` 可整体替换系统提示词（覆盖 `{role}` / `{tools}` 模板）。
 
 ### 5.2 `ReflectionAgent`
@@ -372,11 +380,13 @@ class PlanAndSolveAgent(Agent):
 class FunctionCallAgent(Agent):
     def __init__(self, name, llm, tools=None, system_prompt=None, config=None,
                  custom_prompt=None, memory=None, tracer=None,
-                 memory_enabled=None, context_builder=None): ...
+                 memory_enabled=None, context_builder=None,
+                 max_tool_calls=None): ...
 ```
 
 - 原生 Function Calling：`ToolRegistry.to_openai_schema()` 生成工具 schema，模型返回结构化 `tool_calls`，无正则解析。
 - 一次响应可返回多个工具调用；每个调用执行后以 `role="tool"` + `tool_call_id` 回填，继续循环。
+- `max_tool_calls` 与 `Tool.max_calls_per_run` 共同限制工具调用预算。
 - 工具失败转成 `错误: ...` observation，不中断 Agent；超过 `config.agent.max_steps` 抛 `AgentError`。
 - 与 ReAct 共用 `ToolRegistry / memory / trace / context_builder`，区别只在协议层。
 
@@ -1047,7 +1057,7 @@ py -3.14 scripts/eval_v2.py --dry-run
 
 # 在线 S0/S1（需要项目 .env 的 LLM Key）
 py -3.14 scripts/eval_online_v2.py --suites all --limit 3 --out .cache/eval_online_full
-py -3.14 scripts/eval_online_v2.py --suites tool_calling --agent fc --limit 12 --out .cache/eval_online_fc
+py -3.14 scripts/eval_online_v2.py --suites tool_calling --agent fc --limit 12 --max-tool-calls 2 --out .cache/eval_online_fc
 
 # S2–S5 组合验证（Notes / MCP / A2A）
 py -3.14 scripts/eval_combo_v2.py --suite all --limit 6 --out .cache/eval_combo_s6
