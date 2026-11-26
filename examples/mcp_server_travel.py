@@ -58,7 +58,7 @@ def search_notes(query: str) -> str:
 
 def build_server() -> MCPServer:
     """构建旅行 MCP server。"""
-    server = MCPServer("travel-tools", version="2.0.1")
+    server = MCPServer("travel-tools", version="2.0.2")
     server.add_tool(get_weather)
     server.add_tool(get_attraction)
     server.add_tool(search_notes)
