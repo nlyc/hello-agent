@@ -971,13 +971,14 @@ tool.list_prompts() / tool.get_prompt(name, arguments=None)
 ### 14.2 A2A
 
 ```python
-A2AServer(name, description="", *, host="127.0.0.1", port=0, token="", max_body_bytes=1_000_000)
+A2AServer(name, description="", *, host="127.0.0.1", port=0, token="", max_body_bytes=1_000_000, async_mode=False)
 server.skill(name, description="", *, input_schema=None, output_schema=None)  # 装饰器
 server.start() -> str
 server.stop()
-server.submit_task(skill, payload) -> Task
+server.submit_task(skill, payload) -> Task          # async_mode=False 同步；True 后台执行
 server.get_task(task_id) -> Task
 server.cancel_task(task_id) -> Task
+server.stream_events(task_id, *, timeout=120)       # 状态事件生成器
 
 A2AClient(url, *, timeout=60.0, token="", poll_interval=0.1)
 client.get_card() -> AgentCard
@@ -985,11 +986,13 @@ client.create_task(skill, payload) -> Task
 client.get_task(task_id) -> Task
 client.cancel_task(task_id) -> Task
 client.execute_skill(skill, payload, *, timeout=None) -> list[Artifact]
+client.stream_events(task_id, *, timeout=120)       # SSE 事件迭代器
 
 A2ATool(url, name=None, *, token="", timeout=60.0, tracer=None)
 ```
 
-- 端点：`/.well-known/agent-card.json`、`POST /v1/tasks`、`GET /v1/tasks/{id}`、`POST /v1/tasks/{id}/cancel`。
+- 端点：`/.well-known/agent-card.json`、`POST /v1/tasks`、`GET /v1/tasks/{id}`、`GET /v1/tasks/{id}/events`（SSE）、`POST /v1/tasks/{id}/cancel`。
+- `async_mode=True` 时 `POST /v1/tasks` 立即返回 `submitted/working`，后台线程执行；`/events` 按 `submitted → working → completed/failed/canceled` 推送。
 - 生命周期：`submitted → working → completed / failed / canceled`，非法迁移抛 `A2AError`。
 - 默认只绑 `127.0.0.1`；可选 Bearer；只用 JSON，绝不 `eval`。
 

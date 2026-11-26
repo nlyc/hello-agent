@@ -51,6 +51,7 @@ class A2AServer:
         token: str = "",
         max_body_bytes: int = 1_000_000,
         task_ttl: float = 3600.0,
+        async_mode: bool = False,
     ) -> None:
         self.name = name
         self.description = description
@@ -60,9 +61,11 @@ class A2AServer:
         self.token = token
         self.max_body_bytes = max(1, int(max_body_bytes))
         self.task_ttl = float(task_ttl)
+        self.async_mode = bool(async_mode)
         self._skills: dict[str, Skill] = {}
         self._handlers: dict[str, Callable[[dict[str, Any]], Any]] = {}
         self._tasks: dict[str, Task] = {}
+        self._events: dict[str, list[dict[str, Any]]] = {}
         self._lock = threading.RLock()
         self._http: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -135,7 +138,7 @@ class A2AServer:
     # ----------------------------------------------------------------- tasks
 
     def submit_task(self, skill: str, payload: dict[str, Any]) -> Task:
-        """同步执行一次任务，返回终态 Task。"""
+        """创建任务并执行；``async_mode=True`` 时后台执行并立即返回。"""
         key = str(skill).strip()
         handler = self._handlers.get(key)
         if handler is None:
@@ -144,26 +147,77 @@ class A2AServer:
         with self._lock:
             self._prune_tasks()
             self._tasks[task.id] = task
-        task.transition(TaskStatus.WORKING)
-        if task.status == TaskStatus.CANCELED:
+            self._events[task.id] = []
+        if self.async_mode:
+            worker = threading.Thread(
+                target=self._run_task,
+                args=(task, handler, dict(payload or {})),
+                daemon=True,
+            )
+            worker.start()
             return task
+        return self._run_task(task, handler, dict(payload or {}))
+
+    def _run_task(
+        self,
+        task: Task,
+        handler: Callable[[dict[str, Any]], Any],
+        payload: dict[str, Any],
+    ) -> Task:
+        """执行任务并写入状态事件；失败写入 Task，不抛给 HTTP。"""
         try:
-            result = handler(dict(payload or {}))
-        except Exception as exc:  # 任务失败写入 Task，不抛给 HTTP
+            task.transition(TaskStatus.WORKING)
+        except A2AError:
+            return task
+        self._append_event(task.id, {"type": "status", "task": task.to_dict()})
+        try:
+            result = handler(payload)
+        except Exception as exc:
             task.error = f"{type(exc).__name__}: {exc}"
             try:
                 task.transition(TaskStatus.FAILED)
             except A2AError:
                 pass
+            self._append_event(task.id, {"type": "status", "task": task.to_dict()})
             return task
         if task.status == TaskStatus.CANCELED:
+            self._append_event(task.id, {"type": "status", "task": task.to_dict()})
             return task
         task.artifacts = _to_artifacts(result)
         try:
             task.transition(TaskStatus.COMPLETED)
         except A2AError:
             pass
+        self._append_event(task.id, {"type": "status", "task": task.to_dict()})
         return task
+
+    def _append_event(self, task_id: str, event: dict[str, Any]) -> None:
+        with self._lock:
+            self._events.setdefault(task_id, []).append(dict(event))
+
+    def stream_events(
+        self,
+        task_id: str,
+        *,
+        timeout: float = 120.0,
+        poll_interval: float = 0.2,
+    ):
+        """按顺序产出任务状态事件，直到终态或超时。"""
+        task = self.get_task(task_id)
+        index = 0
+        deadline = time.monotonic() + float(timeout)
+        while True:
+            with self._lock:
+                events = list(self._events.get(task_id, []))
+                status = task.status
+            while index < len(events):
+                yield events[index]
+                index += 1
+            if status.terminal and index >= len(events):
+                break
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(min(poll_interval, max(0.01, deadline - time.monotonic())))
 
     def get_task(self, task_id: str) -> Task:
         """查询任务；不存在抛 ``A2AError``。"""
@@ -177,10 +231,11 @@ class A2AServer:
         """取消任务；终态任务不可取消。"""
         task = self.get_task(task_id)
         task.transition(TaskStatus.CANCELED)
+        self._append_event(task.id, {"type": "status", "task": task.to_dict()})
         return task
 
     def _prune_tasks(self) -> None:
-        """清理超过 TTL 的终态任务。"""
+        """清理超过 TTL 的终态任务与事件。"""
         now = time.time()
         expired = [
             task_id
@@ -190,6 +245,7 @@ class A2AServer:
         ]
         for task_id in expired:
             self._tasks.pop(task_id, None)
+            self._events.pop(task_id, None)
 
     # ---------------------------------------------------------------- server
 
@@ -255,6 +311,17 @@ class _A2ARequestHandler(BaseHTTPRequestHandler):
             return
         if not self._authorized():
             return
+        events_match = re.fullmatch(
+            r"/v1/tasks/([A-Za-z0-9_\-]+)/events", path
+        )
+        if events_match:
+            try:
+                self.a2a.get_task(events_match.group(1))
+            except A2AError as exc:
+                self._send_json(404, {"error": str(exc)})
+                return
+            self._stream_task_events(events_match.group(1))
+            return
         match = re.fullmatch(r"/v1/tasks/([A-Za-z0-9_\-]+)", path)
         if match:
             try:
@@ -293,6 +360,26 @@ class _A2ARequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, task.to_dict())
             return
         self._send_json(404, {"error": f"未知路径：{path}"})
+
+    def _stream_task_events(self, task_id: str) -> None:
+        """SSE 流式输出任务状态事件。"""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        try:
+            for event in self.a2a.stream_events(task_id):
+                payload = json.dumps(event, ensure_ascii=False)
+                self.wfile.write(
+                    f"event: {event.get('type', 'message')}\n"
+                    f"data: {payload}\n\n".encode("utf-8")
+                )
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            self.close_connection = True
 
     def _authorized(self) -> bool:
         if not self.a2a.token:

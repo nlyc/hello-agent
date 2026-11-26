@@ -88,6 +88,39 @@ class A2AClient:
             raise A2AError(f"A2A 任务已取消：{task.id}")
         return list(task.artifacts)
 
+    def stream_events(self, task_id: str, *, timeout: float = 120.0):
+        """订阅任务 SSE 事件，逐条产出 dict。"""
+        request = Request(
+            f"{self.url}/v1/tasks/{task_id}/events",
+            method="GET",
+            headers={"Accept": "text/event-stream"},
+        )
+        if self.token:
+            request.add_header("Authorization", f"Bearer {self.token}")
+        try:
+            response = urlopen(request, timeout=timeout)
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise A2AError(
+                f"A2A HTTP {exc.code}：{detail or exc.reason}"
+            ) from exc
+        except URLError as exc:
+            raise A2AError(f"A2A 连接失败：{exc.reason}") from exc
+        with response:
+            for raw in response:
+                line = raw.decode("utf-8", errors="replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if not data:
+                    continue
+                try:
+                    event = json.loads(data)
+                except ValueError:
+                    continue
+                if isinstance(event, dict):
+                    yield event
+
     def _request(
         self,
         method: str,

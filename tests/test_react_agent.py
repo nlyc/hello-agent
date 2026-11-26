@@ -40,8 +40,35 @@ def test_react_tool_then_finish():
     assert len(llm.calls) == 2
 
 
-def test_react_finish_takes_priority_over_tool_lookup():
-    # 答案里含工具名 get_weather，但 Finish 检查在前，不应触发工具查找
+def test_react_deduplicates_similar_query_calls():
+    calls = []
+    registry = ToolRegistry()
+
+    def search_notes(query):
+        calls.append(query)
+        return "笔记结果：周一闭馆"
+
+    registry.register_function(
+        "search_notes",
+        "检索旅行笔记",
+        search_notes,
+        [ToolParameter("query", "string", "检索词", True)],
+    )
+    llm = ScriptedLLM(
+        [
+            'Thought: 查笔记\nAction: search_notes(query="故宫闭馆")',
+            'Thought: 换个说法再查\nAction: search_notes(query="故宫 周一 闭馆")',
+            "Thought: 够了\nAction: Finish[周一闭馆]",
+        ]
+    )
+    agent = ReActAgent("travel", llm, tools=registry)
+    assert agent.run("故宫周几闭馆") == "周一闭馆"
+    assert calls == ["故宫闭馆"]
+    second_observation = llm.calls[2]["messages"][-1]["content"]
+    assert "重复查询已跳过" in second_observation
+
+
+def test_react_finish_takes_priority_over_tool_lookup():    # 答案里含工具名 get_weather，但 Finish 检查在前，不应触发工具查找
     llm = ScriptedLLM(["Thought: 总结\nAction: Finish[用 get_weather 工具查到晴天]"])
     agent = ReActAgent("travel", llm, tools=ToolRegistry())  # 空注册表，工具不存在
     assert agent.run("x") == "用 get_weather 工具查到晴天"
