@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import hmac
 import json
 import re
 import subprocess
@@ -37,6 +38,7 @@ from agentflow.context import (
     RetrievalContextSource,
 )
 from agentflow.core.config import Config
+from agentflow.core.env import get_env
 from agentflow.llm import OpenAICompatibleLLM
 from agentflow.memory import LongTermMemory, MemoryManager
 from agentflow.notes import NoteContextSource, NoteStore
@@ -1728,9 +1730,15 @@ class ConsoleServer(ThreadingHTTPServer):
         *,
         state: WebState,
         webui_dir: Path = WEBUI_DIR,
+        auth_user: str = "admin",
+        auth_password: str = "",
+        auth_token: str = "",
     ) -> None:
         self.state = state
         self.webui_dir = Path(webui_dir)
+        self.auth_user = str(auth_user or "admin")
+        self.auth_password = str(auth_password or "")
+        self.auth_token = str(auth_token or "")
         super().__init__(server_address, handler)
 
 
@@ -1764,6 +1772,60 @@ class ConsoleHandler(BaseHTTPRequestHandler):
 
     def _send_error_json(self, status: int, message: str) -> None:
         self._send_json({"error": message}, status=status)
+
+    def _authorized(self) -> bool:
+        """可选鉴权：Basic（密码）或 Bearer（Token）；都未配置时放行。"""
+        server = self.server
+        password = str(getattr(server, "auth_password", ""))
+        token = str(getattr(server, "auth_token", ""))
+        if not password and not token:
+            return True
+        header = str(self.headers.get("Authorization", ""))
+        if password and header.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(header[6:]).decode("utf-8")
+            except Exception:
+                return False
+            user, separator, supplied = decoded.partition(":")
+            if separator and hmac.compare_digest(
+                user, str(getattr(server, "auth_user", "admin"))
+            ) and hmac.compare_digest(supplied, password):
+                return True
+        if token and header.startswith("Bearer "):
+            if hmac.compare_digest(header[7:].strip(), token):
+                return True
+        return False
+
+    def _send_unauthorized(self) -> None:
+        """返回 401；POST 时读掉小请求体并关闭连接，避免 keep-alive 污染。"""
+        if self.command == "POST":
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            if 0 < length <= 10_000_000:
+                try:
+                    self.rfile.read(length)
+                except OSError:
+                    pass
+            self.close_connection = True
+        data = json.dumps({"error": "未授权"}, ensure_ascii=False).encode("utf-8")
+        self.send_response(401)
+        if getattr(self.server, "auth_password", ""):
+            self.send_header(
+                "WWW-Authenticate", 'Basic realm="AgentFlow Console"'
+            )
+        elif getattr(self.server, "auth_token", ""):
+            self.send_header(
+                "WWW-Authenticate", 'Bearer realm="AgentFlow Console"'
+            )
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _send_bytes(
         self,
@@ -1810,6 +1872,9 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         try:
+            if not self._authorized():
+                self._send_unauthorized()
+                return
             if path.startswith("/api/"):
                 self._handle_api("GET", path, parse_qs(parsed.query))
                 return
@@ -1823,6 +1888,9 @@ class ConsoleHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         try:
+            if not self._authorized():
+                self._send_unauthorized()
+                return
             if not parsed.path.startswith("/api/"):
                 raise ApiError("未找到接口", 404)
             payload = self._read_json()
@@ -1836,6 +1904,9 @@ class ConsoleHandler(BaseHTTPRequestHandler):
     def do_DELETE(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         try:
+            if not self._authorized():
+                self._send_unauthorized()
+                return
             self._handle_api("DELETE", parsed.path, {})
         except ApiError as exc:
             self._send_error_json(exc.status, str(exc))
@@ -2090,9 +2161,20 @@ def make_server(
     state: WebState,
     host: str = "127.0.0.1",
     port: int = 8000,
+    *,
+    auth_user: str = "admin",
+    auth_password: str = "",
+    auth_token: str = "",
 ) -> ConsoleServer:
-    """创建（但不启动）控制台服务。"""
-    return ConsoleServer((host, port), ConsoleHandler, state=state)
+    """创建（但不启动）控制台服务；可选 Basic / Bearer 鉴权。"""
+    return ConsoleServer(
+        (host, port),
+        ConsoleHandler,
+        state=state,
+        auth_user=auth_user,
+        auth_password=auth_password,
+        auth_token=auth_token,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -2105,15 +2187,44 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--no-browser", action="store_true", help="启动后不自动打开浏览器")
     parser.add_argument("--no-seed", action="store_true", help="不写入内置知识库与演示记忆")
+    parser.add_argument(
+        "--auth-user",
+        default=get_env("WEBUI_USERNAME", "admin"),
+        help="Basic 鉴权用户名（默认 admin）",
+    )
+    parser.add_argument(
+        "--auth-password",
+        default=get_env("WEBUI_PASSWORD", ""),
+        help="Basic 鉴权密码；非空时启用",
+    )
+    parser.add_argument(
+        "--auth-token",
+        default=get_env("WEBUI_TOKEN", ""),
+        help="Bearer Token；非空时启用",
+    )
     args = parser.parse_args(argv)
 
     state = WebState(args.data_dir, seed=not args.no_seed)
-    server = make_server(state, args.host, args.port)
+    server = make_server(
+        state,
+        args.host,
+        args.port,
+        auth_user=args.auth_user,
+        auth_password=args.auth_password,
+        auth_token=args.auth_token,
+    )
     host, port = server.server_address[0], server.server_address[1]
     url_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     url = f"http://{url_host}:{port}"
     print(f"AgentFlow Web 控制台已启动：{url}")
     print(f"数据目录：{state.data_dir}")
+    if args.auth_password or args.auth_token:
+        methods = []
+        if args.auth_password:
+            methods.append("Basic")
+        if args.auth_token:
+            methods.append("Bearer")
+        print(f"鉴权：已启用（{' / '.join(methods)}）")
     print("按 Ctrl+C 停止服务。")
     if not args.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()

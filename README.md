@@ -101,6 +101,7 @@ Copy-Item .env.example .env    # 然后按需填写
 | 向量库 | `VECTOR_STORE`（`sqlite`/`qdrant`）/ `RAG_SQLITE_PATH` / `QDRANT_URL` / `QDRANT_API_KEY` / `QDRANT_COLLECTION` / `QDRANT_TIMEOUT` / `QDRANT_PREFER_GRPC` |
 | 记忆 | `MEMORY_ENABLED` / `MEMORY_SQLITE_PATH` / `MEMORY_TOP_K` / `USER_ID` |
 | Agent | `AGENT_MAX_STEPS` / `AGENT_MAX_TOOL_ITERATIONS` / `MAX_HISTORY_LENGTH` / `DEBUG` |
+| Web 控制台 | `WEBUI_USERNAME` / `WEBUI_PASSWORD`（Basic） / `WEBUI_TOKEN`（Bearer）；全部可选 |
 | 上下文 | `CONTEXT_MAX_TOKENS` / `CONTEXT_RESERVE_RATIO` / `CONTEXT_RELEVANCE_WEIGHT` / `CONTEXT_RECENCY_WEIGHT` / `CONTEXT_RECENT_HISTORY` / `CONTEXT_RECENCY_HALF_LIFE_HOURS` |
 | 笔记 | `NOTES_DIR` / `USER_ID`（笔记按用户隔离，默认 `.data/notes/<user>/`） |
 | 终端 | `TERMINAL_WORKSPACE`（默认沙箱由调用方显式传入；`allowed_commands` / 超时 / 截断可构造传参） |
@@ -117,6 +118,9 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 
 `examples/web_app.py` 用标准库 `ThreadingHTTPServer` 提供零依赖的本地控制台（仅监听 `127.0.0.1`），
 所有数据和产物保存在 `.data/webui/`，重启后文档索引、长期记忆与历史 Demo 运行都会保留。
+
+**可选鉴权**：设置 `WEBUI_PASSWORD` 启用浏览器 Basic 认证，或设置 `WEBUI_TOKEN` 启用 API Bearer；
+两者都未设置时保持本地开放。也可用 `--auth-user` / `--auth-password` / `--auth-token` 启动参数覆盖。
 
 | 页签 | 能做什么 |
 |---|---|
@@ -145,7 +149,7 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 |---|---|---|
 | D1 | 代码仓库（零外部框架依赖） | 本仓库 |
 | D2 | 架构图（Mermaid + PNG） | [`docs/architecture.md`](docs/architecture.md) + [`docs/architecture.png`](docs/architecture.png) |
-| D3 | 单元测试（456 个通过 / 4 跳过，全绿） | [`tests/`](tests/) |
+| D3 | 单元测试（457 个通过 / 4 跳过，全绿） | [`tests/`](tests/) |
 | D4 | 端到端演示 | [`examples/demo_e2e.py`](examples/demo_e2e.py) |
 | D5 | API 设计文档 | [`docs/api-design.md`](docs/api-design.md) |
 | D6 | 三范式轨迹对比报告 | [`docs/trajectory-comparison.md`](docs/trajectory-comparison.md) |

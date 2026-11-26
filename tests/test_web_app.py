@@ -45,15 +45,15 @@ def console(tmp_path):
         thread.join(timeout=5)
 
 
-def _request(base, path, *, method="GET", payload=None):
+def _request(base, path, *, method="GET", payload=None, headers=None):
     """发送请求，返回 (status, headers, body)；HTTP 错误不抛异常。"""
     data = None
-    headers = {}
+    request_headers = dict(headers or {})
     if payload is not None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        headers["Content-Type"] = "application/json"
+        request_headers["Content-Type"] = "application/json"
     request = urllib.request.Request(
-        base + path, data=data, headers=headers, method=method
+        base + path, data=data, headers=request_headers, method=method
     )
     try:
         with urllib.request.urlopen(request, timeout=120) as response:
@@ -1048,3 +1048,51 @@ def test_a2a_cards_endpoint(console):
     payload = _json(base, "/api/protocols/a2a")
     names = {agent["card"]["name"] for agent in payload["agents"]}
     assert names == {"资料员", "规划师", "审查员"}
+
+
+def test_web_optional_basic_and_bearer_auth(tmp_path):
+    state = WebState(tmp_path / "data")
+    server = make_server(
+        state,
+        "127.0.0.1",
+        0,
+        auth_user="admin",
+        auth_password="secret",
+        auth_token="token",
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        status, headers, _ = _request(base, "/")
+        assert status == 401
+        assert "Basic" in headers["WWW-Authenticate"]
+
+        credentials = base64.b64encode(b"admin:secret").decode("ascii")
+        status, _, body = _request(
+            base,
+            "/",
+            headers={"Authorization": f"Basic {credentials}"},
+        )
+        assert status == 200
+        assert b"AgentFlow" in body
+
+        status, _, _ = _request(
+            base,
+            "/api/status",
+            headers={"Authorization": "Bearer token"},
+        )
+        assert status == 200
+
+        wrong = base64.b64encode(b"admin:wrong").decode("ascii")
+        status, _, _ = _request(
+            base,
+            "/api/status",
+            headers={"Authorization": f"Basic {wrong}"},
+        )
+        assert status == 401
+    finally:
+        server.shutdown()
+        server.server_close()
+        state.close()
+        thread.join(timeout=5)
