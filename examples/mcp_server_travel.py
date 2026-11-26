@@ -62,6 +62,25 @@ def build_server() -> MCPServer:
     server.add_tool(get_weather)
     server.add_tool(get_attraction)
     server.add_tool(search_notes)
+    server.add_resource(
+        "travel://guides/beijing",
+        name="北京旅行攻略",
+        description="故宫、颐和园与雨天备选的静态攻略",
+        content=(
+            "北京：故宫周一闭馆，需提前预约；"
+            "颐和园东宫门到长廊一线平缓；"
+            "雨天优先中国国家博物馆、首都博物馆。"
+        ),
+    )
+    server.add_prompt(
+        "plan_trip",
+        description="生成旅行规划提示词",
+        arguments=[{"name": "city", "description": "目的地城市", "required": True}],
+        template=(
+            "请为{city}规划两日行程：写清 D1/D2、预算、同行人约束，"
+            "并标注依据。"
+        ),
+    )
     return server
 
 

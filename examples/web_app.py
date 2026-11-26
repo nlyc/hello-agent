@@ -47,6 +47,7 @@ from agentflow.retrieval import (
     FastEmbedEmbedder,
     HashingEmbedder,
     QdrantVectorStore,
+    RAGAnswer,
     RAGPipeline,
     SQLiteVectorStore,
     load_document,
@@ -996,22 +997,40 @@ class WebState:
             mode = "auto" if use_llm else "none"
         llm, backend, model, notice = self._select_llm(mode)
         error: str | None = notice
+        # 只在锁内做检索/地名校验；LLM 调用放到锁外，避免阻塞状态轮询。
         with self.lock:
             try:
-                result = self.pipeline.answer(question, llm=llm, top_k=limit)
+                hits, failure = self.pipeline.prepare_hits(
+                    question, top_k=limit
+                )
+            except Exception as exc:
+                raise ApiError(f"检索失败：{exc}") from exc
+        if failure:
+            result = RAGAnswer(
+                question=question,
+                answer=failure,
+                citations=[],
+                hits=[],
+                has_answer=False,
+            )
+        else:
+            try:
+                result = self.pipeline.answer_from_hits(
+                    question, hits, llm=llm
+                )
             except Exception as exc:
                 raise ApiError(f"在线回答失败：{exc}") from exc
-            data = result.to_dict()
-            data.update(
-                {
-                    "llm_mode": mode,
-                    "llm_backend": backend,
-                    "llm_model": model,
-                }
-            )
-            if error:
-                data["llm_error"] = error
-            data["answer_source"] = "knowledge_base"
+        data = result.to_dict()
+        data.update(
+            {
+                "llm_mode": mode,
+                "llm_backend": backend,
+                "llm_model": model,
+            }
+        )
+        if error:
+            data["llm_error"] = error
+        data["answer_source"] = "knowledge_base"
         # 本地知识库未命中（无结果或未收录该城市）时，按配置自动联网搜索。
         # 网络请求放在锁外，避免阻塞其它请求。
         if not data.get("has_answer"):
@@ -1273,6 +1292,8 @@ class WebState:
             with self.job_lock:
                 server = mcp.connect()
                 tools = mcp.list_tools()
+                resources = mcp.list_resources()
+                prompts = mcp.list_prompts()
         except Exception as exc:
             raise ApiError(f"MCP 发现失败：{exc}", 502) from exc
         finally:
@@ -1280,6 +1301,8 @@ class WebState:
         return {
             "server": server.get("serverInfo", {}),
             "tools": tools,
+            "resources": resources,
+            "prompts": prompts,
             "duration_ms": round((time.perf_counter() - started) * 1000, 2),
         }
 

@@ -1039,6 +1039,8 @@ def test_mcp_discovery_endpoint(console):
     payload = _json(base, "/api/protocols/mcp")
     names = {tool["name"] for tool in payload["tools"]}
     assert {"get_weather", "get_attraction", "search_notes"} <= names
+    assert payload["resources"]
+    assert payload["prompts"]
 
 
 def test_a2a_cards_endpoint(console):

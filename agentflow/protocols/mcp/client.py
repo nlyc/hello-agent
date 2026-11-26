@@ -262,6 +262,45 @@ class MCPClient:
             raise MCPError(text or f"MCP 工具 '{name}' 调用失败")
         return text
 
+    def list_resources(self) -> list[dict[str, Any]]:
+        """发现 server 暴露的资源。"""
+        self._ensure_connected()
+        result = self._transport.request(
+            "resources/list", {}, timeout=self.timeout
+        )
+        return list((result or {}).get("resources", []))
+
+    def read_resource(self, uri: str) -> str:
+        """读取资源文本内容。"""
+        self._ensure_connected()
+        result = self._transport.request(
+            "resources/read", {"uri": str(uri)}, timeout=self.timeout
+        )
+        contents = list((result or {}).get("contents", []))
+        return "\n".join(
+            str(item.get("text", ""))
+            for item in contents
+            if isinstance(item, dict)
+        ).strip()
+
+    def list_prompts(self) -> list[dict[str, Any]]:
+        """发现 server 暴露的 Prompt。"""
+        self._ensure_connected()
+        result = self._transport.request("prompts/list", {}, timeout=self.timeout)
+        return list((result or {}).get("prompts", []))
+
+    def get_prompt(
+        self, name: str, arguments: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """渲染 Prompt，返回 MCP 消息结构。"""
+        self._ensure_connected()
+        result = self._transport.request(
+            "prompts/get",
+            {"name": str(name), "arguments": dict(arguments or {})},
+            timeout=self.timeout,
+        )
+        return dict(result or {})
+
     def close(self) -> None:
         """关闭传输并回收子进程。"""
         self._transport.close()

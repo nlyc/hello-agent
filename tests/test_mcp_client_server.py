@@ -79,6 +79,36 @@ def test_duplicate_tool_rejected():
         server.add_tool(echo)
 
 
+def test_inmemory_resources_and_prompts():
+    server = make_server()
+    server.add_resource(
+        "travel://guide/beijing",
+        name="北京攻略",
+        description="静态攻略",
+        content="故宫周一闭馆。",
+    )
+    server.add_prompt(
+        "plan_trip",
+        description="生成规划提示词",
+        arguments=[{"name": "city", "required": True}],
+        template="请为{city}规划两日行程。",
+    )
+    client = MCPClient(transport=InMemoryTransport(server.handle))
+    assert client.connect()["capabilities"]["resources"] == {}
+
+    resources = client.list_resources()
+    assert resources[0]["uri"] == "travel://guide/beijing"
+    assert client.read_resource("travel://guide/beijing") == "故宫周一闭馆。"
+
+    prompts = client.list_prompts()
+    assert prompts[0]["name"] == "plan_trip"
+    prompt = client.get_prompt("plan_trip", {"city": "北京"})
+    assert "北京" in prompt["messages"][0]["content"]["text"]
+
+    with pytest.raises(Exception):
+        client.get_prompt("plan_trip", {})
+
+
 def test_stdio_roundtrip(tmp_path):
     script = tmp_path / "server.py"
     script.write_text(

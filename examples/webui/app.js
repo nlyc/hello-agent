@@ -1193,10 +1193,18 @@
       const tools = (data.tools || [])
         .map((tool) => `<li><strong>${esc(tool.name)}</strong>：${esc(tool.description || '')}</li>`)
         .join('');
+      const resources = (data.resources || [])
+        .map((item) => `<li><strong>${esc(item.name || item.uri)}</strong>：<span class="mono">${esc(item.uri)}</span></li>`)
+        .join('');
+      const prompts = (data.prompts || [])
+        .map((item) => `<li><strong>${esc(item.name)}</strong>：${esc(item.description || '')}</li>`)
+        .join('');
       $('#mcp-result').innerHTML = `
         <p class="hint">${esc(server.name || 'MCP')} ${esc(server.version || '')} ·
         ${esc(data.duration_ms ?? '—')} ms</p>
-        <ul>${tools || '<li class="empty">未发现工具</li>'}</ul>`;
+        <h4>工具</h4><ul>${tools || '<li class="empty">未发现工具</li>'}</ul>
+        <h4>资源</h4><ul>${resources || '<li class="empty">未发现资源</li>'}</ul>
+        <h4>Prompts</h4><ul>${prompts || '<li class="empty">未发现 Prompts</li>'}</ul>`;
     }).catch(reason);
   }
 

@@ -21,7 +21,7 @@ v2.0 在 v1.0 与 M8 记忆/RAG 之上新增：
 | `retrieval` | 文档加载（txt/md/pdf/docx/URL）/ 标题感知分块 / Embedder / BM25 / SQLite·Qdrant / RRF 混合检索 / RAGPipeline |
 | `context` | 上下文管线：GSSC / 六分区 / ContextPacket / Memory·RAG·History Source / 预算压缩 |
 | `notes` | 项目式笔记：Markdown + YAML front matter / notes_index.json / 五类型 / NoteContextSource |
-| `protocols` | MCP（JSON-RPC over stdio + MCPTool 自动展开）/ A2A（AgentCard/Task/Artifact + A2ATool） |
+| `protocols` | MCP（JSON-RPC over stdio；Tools / Resources / Prompts + MCPTool 自动展开）/ A2A（AgentCard/Task/Artifact + A2ATool） |
 | `evaluation` | 数据集 / AST 工具调用 / QEM / LLM Judge / Win Rate / 报告与 EvaluationTool |
 | `trace` | 全链路 Trace 回调（TraceEvent / Tracer / 订阅） |
 | `workflow` | 低代码工作流（自研轻量 StateGraph，不依赖 LangGraph） |
@@ -120,7 +120,7 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 | 记忆 | 写入 semantic/episodic/procedural 记忆、记录对话轮次、检索、构建注入上下文、清空；首次启动的 2 条北京演示记忆可通过“概览”开关移除 |
 | 上下文 | 用 ContextBuilder 构建六分区上下文预览，展示 tokens、分区、packets 与丢弃统计 |
 | 笔记 | 新建 / 列出 / 删除 Markdown 笔记，支持 blocker、action、conclusion 等类型 |
-| 协议 | 发现自建旅行 MCP server 的工具；读取 A2A 资料员/规划师/审查员 AgentCard |
+| 协议 | 发现自建旅行 MCP server 的工具 / 资源 / Prompts；读取 A2A 资料员/规划师/审查员 AgentCard |
 | v2 评估 | 运行 `scripts/eval_v2.py` 离线负基线（tool_calling / qa / quality / all） |
 | 三范式 | ReAct / Reflection / Plan-and-Solve 无记忆 vs 有记忆对照；始终使用在线 LLM，ReAct 的天气工具通过 wttr.in 观测接口取实时气温（不可用时降级为搜索摘要并标注），景点工具直接联网查询，Reflection / Plan-and-Solve 注入同一份实时检索资料；“有记忆”读取“记忆”页签中的真实长期记忆，且只读不写回；运行完成后播放一次提示音；需要配置 `LLM_API_KEY` 与 `TAVILY_API_KEY`（或 SerpAPI） |
 | 完整 Demo | 全在线模式：基于你输入的问题与当前知识库检索，由在线 LLM 生成带引用的回答，知识库未命中时自动联网补充；报告只包含本次问题的真实结果，不再输出固定北京模拟章节；可勾选“并入当前知识库”把上传文档加入临时索引；运行完成后播放一次提示音；需要 `LLM_API_KEY` |
@@ -140,7 +140,7 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 |---|---|---|
 | D1 | 代码仓库（零外部框架依赖） | 本仓库 |
 | D2 | 架构图（Mermaid + PNG） | [`docs/architecture.md`](docs/architecture.md) + [`docs/architecture.png`](docs/architecture.png) |
-| D3 | 单元测试（447 个通过 / 4 跳过，全绿） | [`tests/`](tests/) |
+| D3 | 单元测试（448 个通过 / 4 跳过，全绿） | [`tests/`](tests/) |
 | D4 | 端到端演示 | [`examples/demo_e2e.py`](examples/demo_e2e.py) |
 | D5 | API 设计文档 | [`docs/api-design.md`](docs/api-design.md) |
 | D6 | 三范式轨迹对比报告 | [`docs/trajectory-comparison.md`](docs/trajectory-comparison.md) |

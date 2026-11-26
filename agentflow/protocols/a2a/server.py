@@ -300,6 +300,18 @@ class _A2ARequestHandler(BaseHTTPRequestHandler):
         header = str(self.headers.get("Authorization", ""))
         if header == f"Bearer {self.a2a.token}":
             return True
+        if self.command == "POST":
+            # 鉴权失败时请求体尚未读取；读掉小请求体并关闭连接，避免 RST。
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            if 0 < length <= 10_000_000:
+                try:
+                    self.rfile.read(length)
+                except OSError:
+                    pass
+            self.close_connection = True
         self._send_json(401, {"error": "未授权"})
         return False
 

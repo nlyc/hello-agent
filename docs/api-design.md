@@ -943,20 +943,28 @@ TerminalTool(
 ```python
 MCPServer(name, version="2.0.0")
 server.add_tool(func, *, name=None, description=None, input_schema=None)
+server.add_resource(uri, *, name="", mime_type="text/plain", description="", content=None, loader=None)
+server.list_resources() / server.read_resource(uri)
+server.add_prompt(name, *, description="", arguments=None, template="", builder=None)
+server.list_prompts() / server.get_prompt(name, arguments=None)
 server.run_stdio()
 
 MCPClient(command=None, *, transport=None, timeout=10.0, cwd=None, env=None)
 client.connect() -> dict
 client.list_tools() -> list[dict]
-client.call_tool(name, arguments=None) -> str
+client.call_tool(name, arguments=None, *, timeout=None) -> str
+client.list_resources() / client.read_resource(uri)
+client.list_prompts() / client.get_prompt(name, arguments=None)
 client.close()
 
 MCPTool(name, command=None, *, transport=None, timeout=30.0, tracer=None)
 tool.expand() -> list[MCPRemoteTool]
 tool.expand_and_register(registry) -> list[MCPRemoteTool]
+tool.list_resources() / tool.read_resource(uri)
+tool.list_prompts() / tool.get_prompt(name, arguments=None)
 ```
 
-- 子集：`initialize / tools/list / tools/call`；stdio 换行分隔 JSON-RPC 2.0。
+- 子集：`initialize / tools/list / tools/call / resources/list / resources/read / prompts/list / prompts/get`；stdio 换行分隔 JSON-RPC 2.0。
 - 包装器名称 `f"{server}_{remote}"`；`inputSchema` → `ToolParameter`；字符串参数按 schema 转换。
 - 失败转 `ToolError`，并发 `mcp.call` Trace。
 

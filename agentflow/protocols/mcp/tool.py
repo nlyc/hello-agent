@@ -62,6 +62,24 @@ class MCPTool(Tool):
         """返回远程工具描述。"""
         return self.client.list_tools()
 
+    def list_resources(self) -> list[dict[str, Any]]:
+        """返回远程资源描述。"""
+        return self.client.list_resources()
+
+    def read_resource(self, uri: str) -> str:
+        """读取远程资源。"""
+        return self.client.read_resource(uri)
+
+    def list_prompts(self) -> list[dict[str, Any]]:
+        """返回远程 Prompt 描述。"""
+        return self.client.list_prompts()
+
+    def get_prompt(
+        self, name: str, arguments: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """获取远程 Prompt。"""
+        return self.client.get_prompt(name, arguments)
+
     def expand(self) -> list["MCPRemoteTool"]:
         """发现并包装远程工具；重复调用复用缓存。"""
         if self._expanded is not None:

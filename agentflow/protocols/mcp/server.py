@@ -31,6 +31,8 @@ class MCPServer:
         self.name = name
         self.version = version
         self._tools: dict[str, dict[str, Any]] = {}
+        self._resources: dict[str, dict[str, Any]] = {}
+        self._prompts: dict[str, dict[str, Any]] = {}
 
     def add_tool(
         self,
@@ -70,17 +72,165 @@ class MCPServer:
             for name, item in sorted(self._tools.items())
         ]
 
+    # ------------------------------------------------------- resources/prompts
+
+    def add_resource(
+        self,
+        uri: str,
+        *,
+        name: str = "",
+        mime_type: str = "text/plain",
+        description: str = "",
+        content: str | None = None,
+        loader: Callable[[], Any] | None = None,
+    ) -> str:
+        """注册一个资源；``content`` 与 ``loader`` 二选一。"""
+        key = str(uri).strip()
+        if not key:
+            raise ValueError("资源 uri 不能为空")
+        if key in self._resources:
+            raise ValueError(f"资源已存在：{key}")
+        if content is None and loader is None:
+            raise ValueError("resource 需要 content 或 loader")
+        self._resources[key] = {
+            "uri": key,
+            "name": str(name or key),
+            "mimeType": str(mime_type),
+            "description": str(description),
+            "content": content,
+            "loader": loader,
+        }
+        return key
+
+    def list_resources(self) -> list[dict[str, Any]]:
+        """返回资源描述列表（不包含内容/加载器）。"""
+        return [
+            {
+                "uri": item["uri"],
+                "name": item["name"],
+                "mimeType": item["mimeType"],
+                "description": item["description"],
+            }
+            for _, item in sorted(self._resources.items())
+        ]
+
+    def read_resource(self, uri: str) -> dict[str, Any]:
+        """读取资源内容。"""
+        item = self._resources.get(str(uri).strip())
+        if item is None:
+            raise JsonRpcError(INVALID_PARAMS, f"未知资源：{uri}")
+        try:
+            value = item["loader"]() if item["loader"] is not None else item["content"]
+        except Exception as exc:
+            raise JsonRpcError(INTERNAL_ERROR, f"资源读取失败：{exc}") from exc
+        if isinstance(value, bytes):
+            text = value.decode("utf-8", errors="replace")
+        else:
+            text = str(value)
+        return {
+            "contents": [
+                {
+                    "uri": item["uri"],
+                    "mimeType": item["mimeType"],
+                    "text": text,
+                }
+            ]
+        }
+
+    def add_prompt(
+        self,
+        name: str,
+        *,
+        description: str = "",
+        arguments: list[dict[str, Any]] | None = None,
+        template: str = "",
+        builder: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> str:
+        """注册 Prompt 模板；``template`` 用 ``str.format(**arguments)``，或传 ``builder``。"""
+        key = str(name).strip()
+        if not key:
+            raise ValueError("prompt 名称不能为空")
+        if key in self._prompts:
+            raise ValueError(f"prompt 已存在：{key}")
+        if not template and builder is None:
+            raise ValueError("prompt 需要 template 或 builder")
+        self._prompts[key] = {
+            "name": key,
+            "description": str(description),
+            "arguments": list(arguments or []),
+            "template": template,
+            "builder": builder,
+        }
+        return key
+
+    def list_prompts(self) -> list[dict[str, Any]]:
+        """返回 Prompt 描述列表。"""
+        return [
+            {
+                "name": item["name"],
+                "description": item["description"],
+                "arguments": item["arguments"],
+            }
+            for _, item in sorted(self._prompts.items())
+        ]
+
+    def get_prompt(
+        self, name: str, arguments: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """渲染 Prompt 并返回 MCP 风格消息。"""
+        item = self._prompts.get(str(name).strip())
+        if item is None:
+            raise JsonRpcError(INVALID_PARAMS, f"未知 prompt：{name}")
+        values = dict(arguments or {})
+        try:
+            text = (
+                item["builder"](values)
+                if item["builder"] is not None
+                else item["template"].format(**values)
+            )
+        except KeyError as exc:
+            raise JsonRpcError(INVALID_PARAMS, f"缺少 prompt 参数：{exc}") from exc
+        except Exception as exc:
+            raise JsonRpcError(INTERNAL_ERROR, f"prompt 渲染失败：{exc}") from exc
+        return {
+            "description": item["description"],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": {"type": "text", "text": str(text)},
+                }
+            ],
+        }
+
     def handle(self, method: str, params: dict[str, Any] | None = None) -> Any:
         """处理单个 JSON-RPC 方法；失败抛 ``JsonRpcError``。"""
         payload = dict(params or {})
         if method == "initialize":
             return {
                 "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {"tools": {}},
+                "capabilities": {
+                    "tools": {},
+                    "resources": {},
+                    "prompts": {},
+                },
                 "serverInfo": {"name": self.name, "version": self.version},
             }
         if method == "tools/list":
             return {"tools": self.list_tools()}
+        if method == "resources/list":
+            return {"resources": self.list_resources()}
+        if method == "resources/read":
+            uri = str(payload.get("uri", "")).strip()
+            if not uri:
+                raise JsonRpcError(INVALID_PARAMS, "resources/read 需要 uri")
+            return self.read_resource(uri)
+        if method == "prompts/list":
+            return {"prompts": self.list_prompts()}
+        if method == "prompts/get":
+            name = str(payload.get("name", "")).strip()
+            if not name:
+                raise JsonRpcError(INVALID_PARAMS, "prompts/get 需要 name")
+            return self.get_prompt(name, payload.get("arguments"))
         if method == "tools/call":
             name = str(payload.get("name", "")).strip()
             if not name:
