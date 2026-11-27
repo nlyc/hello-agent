@@ -24,7 +24,7 @@ v2.0 在 v1.0 与 M8 记忆/RAG 之上新增：
 | `context` | 上下文管线：GSSC / 六分区 / ContextPacket / Memory·RAG·History Source / 预算压缩 |
 | `notes` | 项目式笔记：Markdown + YAML front matter / notes_index.json / 五类型 / NoteContextSource |
 | `protocols` | MCP（stdio + HTTP/SSE；Tools / Resources / Prompts + MCPTool 自动展开）/ A2A（AgentCard/Task/Artifact + A2ATool + SSE 任务事件） |
-| `evaluation` | 数据集 / AST 工具调用 / QEM / LLM Judge / Win Rate / 报告与 EvaluationTool |
+| `evaluation` | 数据集 / AST 工具调用 / QEM / LLM Judge / Win Rate / 多次采样聚合与置信区间 / 报告与 EvaluationTool |
 | `trace` | 全链路 Trace 回调（TraceEvent / Tracer / 订阅） |
 | `workflow` | 低代码工作流（自研轻量 StateGraph，不依赖 LangGraph） |
 | `utils` | helpers / logging / serialization |
@@ -69,11 +69,14 @@ py -3.14 scripts/eval_v2.py --suite all --limit 5
 # v2.0：在线对比 S0（v1.1）vs S1（ContextBuilder）；默认 limit=3 控制成本
 py -3.14 scripts/eval_online_v2.py --suites all --limit 3 --out .cache/eval_online_full
 
+# v2.1：可靠性评估（36 工具 / 27 QA / 18 行程，3 轮采样 + Wilson 区间）
+py -3.14 scripts/eval_reliability_v2.py --suites all --repeat 3 --temperature 0.7 --out .cache/eval_reliability
+
 # v2.0：S2–S5 组合验证（Notes / MCP / A2A）
 py -3.14 scripts/eval_combo_v2.py --suite all --limit 6 --out .cache/eval_combo_s6
 
-# v2.0：原生 Function Calling 对照（与 ReAct 同 12 题）
-py -3.14 scripts/eval_online_v2.py --suites tool_calling --agent fc --limit 12 --out .cache/eval_online_fc
+# v2.0：原生 Function Calling 对照（与 ReAct 同 36 题）
+py -3.14 scripts/eval_online_v2.py --suites tool_calling --agent fc --limit 36 --out .cache/eval_online_fc
 
 # 架构图 PNG（交付物 D2）
 py -3.14 scripts/render_architecture.py
@@ -149,7 +152,7 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 |---|---|---|
 | D1 | 代码仓库（零外部框架依赖） | 本仓库 |
 | D2 | 架构图（Mermaid + PNG） | [`docs/architecture.md`](docs/architecture.md) + [`docs/architecture.png`](docs/architecture.png) |
-| D3 | 单元测试（457 个通过 / 4 跳过，全绿） | [`tests/`](tests/) |
+| D3 | 单元测试（463 个通过 / 4 跳过，全绿） | [`tests/`](tests/) |
 | D4 | 端到端演示 | [`examples/demo_e2e.py`](examples/demo_e2e.py) |
 | D5 | API 设计文档 | [`docs/api-design.md`](docs/api-design.md) |
 | D6 | 三范式轨迹对比报告 | [`docs/trajectory-comparison.md`](docs/trajectory-comparison.md) |
@@ -161,6 +164,7 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 | D12 | 评估基准集与评估工具 | [`agentflow/evaluation/`](agentflow/evaluation/) · [`scripts/eval_v2.py`](scripts/eval_v2.py) · [`data/eval/`](data/eval/) |
 | D13 | v2.0 对比评估报告 | [`docs/v2.0-eval-report.md`](docs/v2.0-eval-report.md) |
 | D14 | v2.0 交付检查 | [`docs/v2.0-delivery-check.md`](docs/v2.0-delivery-check.md) |
+| D15 | v2.1 评估可信度报告（扩样 / 三轮采样 / Wilson 区间） | [`docs/v2.1-eval-reliability.md`](docs/v2.1-eval-reliability.md) |
 
 ## 里程碑
 
@@ -197,3 +201,4 @@ Web 控制台的“检索与在线能力”卡片可直接切换 Embedding 后�
 - [x] M9.7 评估：mini-BFCL、旅行 QA、行程质量、LLM Judge / Win Rate、EvaluationTool
 - [x] M9.8 对比报告（离线基线；在线 S2–S5 需 LLM_API_KEY）
 - [x] M9.9 回归、文档、版本与交付检查
+- [x] M9.22 评估可信度：36 工具 / 27 QA / 18 行程；3 轮采样 + Wilson 区间 + 稳定性/失败样例

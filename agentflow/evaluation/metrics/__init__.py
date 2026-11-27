@@ -18,6 +18,7 @@ from agentflow.evaluation.metrics.qa import (
     normalize_list,
     normalize_string,
     quasi_exact_match,
+    strip_citations,
 )
 from agentflow.evaluation.metrics.tool_calling import (
     ToolCall,
@@ -51,5 +52,6 @@ __all__ = [
     "parse_judge_output",
     "quasi_exact_match",
     "safe_eval",
+    "strip_citations",
     "values_equal",
 ]

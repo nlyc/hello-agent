@@ -21,8 +21,8 @@ CASES_PATH = REPO_ROOT / "data" / "eval" / "travel_qa.jsonl"
 def test_eval_cases_are_complete_and_unique():
     cases = load_cases(CASES_PATH)
 
-    assert len(cases) == 9
-    assert len({case["id"] for case in cases}) == 9
+    assert len(cases) == 27
+    assert len({case["id"] for case in cases}) == 27
     for case in cases:
         assert case["question"].strip()
         assert case["gold_answer"].strip()

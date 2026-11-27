@@ -33,16 +33,21 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_dataset_load_and_filter():
     dataset = EvalDataset.load(ROOT / "data/eval/tool_calling.jsonl")
     assert dataset.name == "tool_calling"
-    assert len(dataset.cases) == 12
+    assert len(dataset.cases) == 36
     assert dataset.sha256 == sha256_file(ROOT / "data/eval/tool_calling.jsonl")
     simple = dataset.filtered(category="simple")
-    assert len(simple) == 4
+    assert len(simple) == 12
     assert all(case.category == "simple" for case in simple)
     assert len(dataset.filtered(limit=3)) == 3
 
     qa = EvalDataset.load(ROOT / "data/eval/travel_qa.jsonl", name="qa")
     assert qa.cases[0].ground_truth == "周一闭馆"
     assert qa.cases[0].metadata["city"] == "北京"
+
+    quality = EvalDataset.load(
+        ROOT / "data/eval/itinerary_tasks.jsonl", name="quality"
+    )
+    assert len(quality.cases) == 18
 
 
 def test_report_render_and_write(tmp_path):

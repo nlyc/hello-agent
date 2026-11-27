@@ -1,5 +1,13 @@
 """agentflow.evaluation —— 数据集 / 指标 / 评估器 / 报告 / EvaluationTool。"""
 
+from agentflow.evaluation.aggregate import (
+    aggregate_reports,
+    render_aggregate,
+    render_aggregate_summary,
+    wilson_interval,
+    write_aggregate,
+    write_aggregate_summary,
+)
 from agentflow.evaluation.dataset import (
     EvalDataset,
     iter_jsonl,
@@ -32,6 +40,7 @@ from agentflow.evaluation.metrics import (
     parse_judge_output,
     quasi_exact_match,
     safe_eval,
+    strip_citations,
     values_equal,
 )
 from agentflow.evaluation.report import render_report, write_report
@@ -52,6 +61,7 @@ __all__ = [
     "ToolCallCollector",
     "ToolCallingEvaluator",
     "WinRateJudge",
+    "aggregate_reports",
     "as_number",
     "calls_equal",
     "check_itinerary",
@@ -67,10 +77,16 @@ __all__ = [
     "normalize_string",
     "parse_judge_output",
     "quasi_exact_match",
+    "render_aggregate",
+    "render_aggregate_summary",
     "render_report",
     "safe_eval",
     "sha256_file",
+    "strip_citations",
     "values_equal",
+    "wilson_interval",
+    "write_aggregate",
+    "write_aggregate_summary",
     "write_jsonl",
     "write_report",
 ]

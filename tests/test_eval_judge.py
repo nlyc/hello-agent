@@ -117,6 +117,12 @@ def test_constraints_distinguish_negation():
         {"days": 2, "budget": 1500, "must_include": ["故宫"]},
     )["checks"]["must_include"]
 
+    # 「腿脚不便的父亲」中的“不便”是描述，不是否定包含。
+    assert check_itinerary(
+        "带腿脚不便的父亲去北京两日游。D1 颐和园；D2 故宫。预算 1500 元。",
+        {"days": 2, "budget": 1500, "must_include": ["故宫"]},
+    )["checks"]["must_include"]
+
     # 「避开周一」「周一闭馆」是合规表达。
     assert check_itinerary(
         "避开周一，故宫周一闭馆。D1 天坛；D2 颐和园。预算 1500 元。",
@@ -194,4 +200,27 @@ def test_constraints_distinguish_negation():
     assert check_itinerary(
         "不建议安排香山登顶：资料明确“登顶需要连续爬坡约一小时”。",
         {"must_avoid": ["爬坡"]},
+    )["checks"]["must_avoid"]
+
+    # 「都江堰行程建议改期」是规避表达，不是安排了都江堰。
+    assert check_itinerary(
+        "D1 成都博物馆；都江堰行程建议改期。预算 500 元。",
+        {"budget": 500, "must_avoid": ["都江堰"]},
+    )["checks"]["must_avoid"]
+
+    # 同行人同义词：孩子/儿童、母亲/老人 不应误判。
+    assert check_itinerary(
+        "带六岁儿童游览上海博物馆。预算 1800 元。",
+        {"budget": 1800, "companions": ["孩子"]},
+    )["checks"]["companions"]
+    assert check_itinerary(
+        "带老人游西湖，尽量少走路。预算 1500 元。",
+        {"budget": 1500, "companions": ["母亲"]},
+    )["checks"]["companions"]
+
+    # 同一句里的资料性提及（且都江堰景区步行较长）不应被当成安排。
+    assert check_itinerary(
+        "D1 成都博物馆；原都江堰行程建议改期，"
+        "且都江堰景区步行距离较长。预算 500 元。",
+        {"budget": 500, "must_avoid": ["都江堰"]},
     )["checks"]["must_avoid"]

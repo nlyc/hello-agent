@@ -76,6 +76,20 @@ class EvalResult:
             "tokens": self.tokens,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "EvalResult":
+        """从报告 JSON 还原单条结果。"""
+        return cls(
+            case_id=str(data.get("case_id", "")),
+            passed=bool(data.get("passed")),
+            score=float(data.get("score", 0.0) or 0.0),
+            metrics=dict(data.get("metrics", {}) or {}),
+            output=str(data.get("output", "") or ""),
+            error=str(data.get("error", "") or ""),
+            latency_ms=float(data.get("latency_ms", 0.0) or 0.0),
+            tokens=int(data.get("tokens", 0) or 0),
+        )
+
 
 @dataclass
 class EvalReport:
@@ -95,3 +109,18 @@ class EvalReport:
             "metrics": dict(self.metrics),
             "manifest": dict(self.manifest),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "EvalReport":
+        """从报告 JSON 还原；用于多次采样聚合。"""
+        return cls(
+            suite=str(data.get("suite", "")),
+            system=str(data.get("system", "")),
+            cases=[
+                EvalResult.from_dict(item)
+                for item in (data.get("cases", []) or [])
+                if isinstance(item, dict)
+            ],
+            metrics=dict(data.get("metrics", {}) or {}),
+            manifest=dict(data.get("manifest", {}) or {}),
+        )

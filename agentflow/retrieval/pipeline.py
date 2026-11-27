@@ -275,6 +275,7 @@ class RAGPipeline:
         hits: Sequence[RetrievalHit],
         *,
         llm: Any | None = None,
+        temperature: float | None = None,
     ) -> RAGAnswer:
         """基于已准备好的检索结果回答（可放在锁外执行 LLM）。"""
         prepared = list(hits)
@@ -304,7 +305,10 @@ class RAGPipeline:
             },
         ]
         try:
-            answer = llm.chat(messages, temperature=0.2)
+            answer = llm.chat(
+                messages,
+                temperature=0.2 if temperature is None else float(temperature),
+            )
         except Exception as exc:
             raise RAGError(f"RAG 回答生成失败：{exc}") from exc
         return RAGAnswer(
@@ -322,6 +326,7 @@ class RAGPipeline:
         llm: Any | None = None,
         top_k: int = 5,
         filters: dict[str, Any] | None = None,
+        temperature: float | None = None,
     ) -> RAGAnswer:
         """基于检索结果回答；``llm`` 为空时使用首条命中的抽取式回答。"""
         hits, failure = self.prepare_hits(
@@ -335,7 +340,9 @@ class RAGPipeline:
                 hits=[],
                 has_answer=False,
             )
-        return self.answer_from_hits(question, hits, llm=llm)
+        return self.answer_from_hits(
+            question, hits, llm=llm, temperature=temperature
+        )
 
     def stats(self) -> dict[str, Any]:
         """返回当前索引的简要统计。"""

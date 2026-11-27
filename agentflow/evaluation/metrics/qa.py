@@ -14,7 +14,20 @@ _UNITS = re.compile(
     re.IGNORECASE,
 )
 _NUMBER = re.compile(r"^[+-]?\d+(?:\.\d+)?$")
-_CN_NUMBER = re.compile(r"[零一二两三四五六七八九十]{1,3}(?=[点时号日天])")
+_CN_NUMBER = re.compile(r"[零一二两三四五六七八九十]{1,3}(?=[点时号日天月])")
+_CN_DECIMAL = re.compile(r"([零一二两三四五六七八九])点([零一二三四五六七八九])")
+_CN_MEASURE = re.compile(
+    r"([零一二两三四五六七八九十]{1,3})(?=(?:元|公里|千米|小时|分钟|岁|人|次|个|只|座|层|米))"
+)
+_TIME_COLON = re.compile(r"(\d{1,2})\s*:\s*(\d{2})")
+_NIGHT_RANGE = re.compile(
+    r"(?:晚上|傍晚|夜里)\s*"
+    r"(\d{1,2}|[零一二两三四五六七八九十]{1,3})\s*点\s*"
+    r"(?:至|到|[-–—~～])\s*"
+    r"(\d{1,2}|[零一二两三四五六七八九十]{1,3})\s*点"
+)
+_DASH = re.compile(r"[–—~～]")
+_LIST_SEPARATOR = re.compile(r"[,，、;；]|(?<=.)和(?=.)|(?<=.)及(?=.)")
 _CN_DIGITS = {
     "零": 0,
     "一": 1,
@@ -46,6 +59,35 @@ def _cn_to_int(text: str) -> int | None:
     return _CN_DIGITS.get(text)
 
 
+def _cn_or_int(text: str) -> int | None:
+    """``七`` / ``十七`` / ``7`` 统一转整数。"""
+    if text.isdigit():
+        return int(text)
+    return _cn_to_int(text)
+
+
+def _night_range(match: re.Match[str]) -> str:
+    """``晚上七点至九点`` / ``晚上7点至9点`` → ``19点-21点``。"""
+    start = _cn_or_int(match.group(1))
+    end = _cn_or_int(match.group(2))
+    if start is None or end is None:
+        return match.group(0)
+    if start < 12:
+        start += 12
+    if end < 12:
+        end += 12
+    return f"{start}点-{end}点"
+
+
+def strip_citations(text: str) -> str:
+    """去掉末尾「依据：/参考来源：」引用块，保留正文。"""
+    source = str(text or "").strip()
+    citation = re.search(r"\n\s*(?:依据|参考来源|参考引用)\s*[:：]", source)
+    if citation:
+        source = source[: citation.start()].strip()
+    return source
+
+
 def extract_final_answer(text: str) -> str:
     """按 GAIA 纪律提取答案：FINAL ANSWER → 答案: → 去掉引用块的正文。"""
     source = str(text or "").strip()
@@ -60,9 +102,7 @@ def extract_final_answer(text: str) -> str:
         if match:
             return match.group(1).strip().splitlines()[0].strip()
     # RAG 回答常在末尾追加「依据：…」；它不是答案，先剥离。
-    citation = re.search(r"\n\s*(?:依据|参考来源|参考引用)\s*[:：]", source)
-    if citation:
-        source = source[: citation.start()].strip()
+    source = strip_citations(source)
     lines = [line.strip() for line in source.splitlines() if line.strip()]
     return lines[-1] if lines else ""
 
@@ -82,14 +122,33 @@ def as_number(value: Any) -> float | None:
 
 
 def normalize_string(text: Any) -> str:
-    """小写、去 Markdown、去冠词、中文时间数字转阿拉伯、压缩空白。"""
+    """小写、去 Markdown、去冠词、中文数字/时间转阿拉伯、压缩空白。"""
     value = str(text or "").strip().lower()
     value = _MARKDOWN.sub("", value)
     value = _ARTICLES.sub(" ", value)
+    # 晚上七点至九点 / 晚上7点至9点 → 19点-21点，与 19:00–21:00 对齐。
+    value = _NIGHT_RANGE.sub(_night_range, value)
+    value = _DASH.sub("-", value)
+    # 8:30 → 8点30分；八点半 → 八点30分，随后统一中文数字。
+    value = _TIME_COLON.sub(
+        lambda match: f"{int(match.group(1))}点{int(match.group(2))}分", value
+    )
+    value = value.replace("点半", "点30分")
+    value = _CN_DECIMAL.sub(
+        lambda match: f"{_CN_DIGITS.get(match.group(1), 0)}."
+        f"{_CN_DIGITS.get(match.group(2), 0)}",
+        value,
+    )
     value = _CN_NUMBER.sub(
         lambda match: str(_cn_to_int(match.group(0)) or match.group(0)), value
     )
+    value = re.sub(r"(\d+)点0分", r"\1点", value)
+    value = _CN_MEASURE.sub(
+        lambda match: str(_cn_to_int(match.group(0)) or match.group(0)), value
+    )
     value = _PUNCT.sub("", value)
+    # 中文/数字之间的排版空格不承载语义：`1.5 公里` ≡ `1.5公里`。
+    value = re.sub(r"(?<=[\d一-鿿])\s+(?=[\d一-鿿])", "", value)
     return " ".join(value.split())
 
 
@@ -122,10 +181,21 @@ def quasi_exact_match(prediction: Any, gold: Any) -> bool:
 
 
 def containment_match(prediction: Any, gold: Any) -> bool:
-    """归一化后的 gold 是否被 prediction 包含。"""
+    """归一化后的 gold 是否被 prediction 包含；列表项支持顺序无关。"""
     left = normalize_string(prediction)
     right = normalize_string(gold)
-    return bool(right) and right in left
+    if bool(right) and right in left:
+        return True
+    # 「A、B 和 C」只要各项都出现即可，避免分隔符差异导致假阴性。
+    raw_items = [
+        item.strip()
+        for item in _LIST_SEPARATOR.split(str(gold or ""))
+        if item.strip()
+    ]
+    if len(raw_items) >= 2 and all(len(item) >= 2 for item in raw_items):
+        items = [normalize_string(item) for item in raw_items]
+        return all(item and item in left for item in items)
+    return False
 
 
 def _citation_norm(text: Any) -> str:
@@ -162,8 +232,11 @@ def evaluate_qa(
     引用覆盖是独立诊断指标，不参与 ``passed``；答案正确性只看 QEM/包含。
     """
     answer = extract_final_answer(prediction)
+    body = strip_citations(prediction)
     exact = quasi_exact_match(answer, gold)
-    contains = containment_match(answer, gold)
+    # 多行 RAG 回答常在正文列出事实、末行才给结论；
+    # 包含判定同时看正文，避免因排版差异把正确答案判错。
+    contains = containment_match(answer, gold) or containment_match(body, gold)
     coverage = citation_coverage(citations, expected_citations)
     passed = exact or contains
     return {

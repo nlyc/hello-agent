@@ -4,6 +4,7 @@
 
 - 语料：4 篇旅行知识，共 13 个 chunk
 - 评估集：`data/eval/travel_qa.jsonl`，9 条单跳问题
+  - 注：v2.1 已扩展至 27 条；本报告保留 M8 当时的 9 条结果，新结果见 [`v2.1-eval-reliability.md`](v2.1-eval-reliability.md)
 - 检索：BM25 单路 / Hashing 稠密 + BM25 混合（RRF）/ 可选 FastEmbed + BM25
 - 生成方式：`py -3.14 scripts/eval_rag.py --out docs/m8-memory-rag-eval.md`
 

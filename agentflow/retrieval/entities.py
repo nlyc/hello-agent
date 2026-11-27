@@ -124,7 +124,7 @@ def detect_places(text: str, extra: Iterable[str] | None = None) -> list[str]:
     return result
 
 
-_LOCATION_VERBS = "去到在游逛爬住往从看玩"
+_LOCATION_VERBS = "去到在游逛爬住往从看玩登"
 _QUESTION_MARKERS = (
     "周几", "几点", "什么时候", "开放", "闭馆", "门票", "时间", "怎么", "如何",
     "适合", "天气", "气温", "下雨", "好玩", "值得", "旅游", "旅行", "一日游",

@@ -61,9 +61,10 @@ class CallableAgent:
 class ContextRAG:
     """S1：检索命中 → ContextBuilder 六分区 → LLM 作答。"""
 
-    def __init__(self, pipeline: Any, llm: Any) -> None:
+    def __init__(self, pipeline: Any, llm: Any, *, temperature: float = 0.0) -> None:
         self.pipeline = pipeline
         self.llm = llm
+        self.temperature = float(temperature)
         self.builder = ContextBuilder(
             [RetrievalContextSource(pipeline)],
             config=ContextConfig(max_tokens=3000),
@@ -89,7 +90,7 @@ class ContextRAG:
                 "content": f"用户问题：{question}\n请给出简洁、可核验的回答。",
             },
         ]
-        answer = self.llm.chat(messages, temperature=0.0)
+        answer = self.llm.chat(messages, temperature=self.temperature)
         return RAGAnswer(
             question=question,
             answer=str(answer).strip(),
@@ -99,21 +100,22 @@ class ContextRAG:
         )
 
 
-def build_llm() -> tuple[OpenAICompatibleLLM, dict[str, Any]]:
+def build_llm(temperature: float = 0.0) -> tuple[OpenAICompatibleLLM, dict[str, Any]]:
     """从 .env 构建 LLM；缺失 Key 时明确报错。"""
     config = Config.from_env()
     if not config.llm.api_key:
         raise RuntimeError("未配置 LLM_API_KEY，无法运行在线评估")
+    temperature = float(temperature)
     llm = OpenAICompatibleLLM(
         base_url=config.llm.base_url,
         api_key=config.llm.api_key,
         model=config.llm.model,
-        temperature=0.0,
+        temperature=temperature,
         timeout=90.0,
     )
     manifest = {
         "model": config.llm.model,
-        "temperature": 0.0,
+        "temperature": temperature,
         "base_url_configured": bool(config.llm.base_url),
     }
     return llm, manifest
@@ -224,14 +226,16 @@ def run_qa(llm, dataset, args) -> list[tuple[str, Any]]:
     cases = _select_cases(dataset, args)
     reports = []
     s0 = QAEvaluator(
-        lambda question: pipeline.answer(question, llm=llm),
+        lambda question: pipeline.answer(
+            question, llm=llm, temperature=args.temperature
+        ),
         system=f"S0_rag:{llm.model}",
         citation_map=citation_map,
     ).run(cases, category=args.category)
     reports.append(("qa_S0", s0))
 
     s1 = QAEvaluator(
-        ContextRAG(pipeline, llm),
+        ContextRAG(pipeline, llm, temperature=args.temperature),
         system=f"S1_context_rag:{llm.model}",
         citation_map=citation_map,
     ).run(cases, category=args.category)
@@ -246,8 +250,8 @@ def run_quality(llm, judge_llm, dataset, args) -> list[tuple[str, Any]]:
     reports = []
 
     s0_prompt = (
-        "你是旅行规划师。请根据用户要求给出两日行程，"
-        "必须写出 D1/D2、预算与同行人约束。"
+        "你是旅行规划师。请严格按用户要求的天数给出行程，"
+        "写出 D1、D2…Dn，并列出预算与同行人约束。"
     )
 
     def s0_answer(question: str) -> str:
@@ -256,7 +260,7 @@ def run_quality(llm, judge_llm, dataset, args) -> list[tuple[str, Any]]:
                 {"role": "system", "content": s0_prompt},
                 {"role": "user", "content": question},
             ],
-            temperature=0.0,
+            temperature=args.temperature,
         )
 
     reports.append(
@@ -272,7 +276,7 @@ def run_quality(llm, judge_llm, dataset, args) -> list[tuple[str, Any]]:
         [RetrievalContextSource(pipeline)],
         config=ContextConfig(max_tokens=3000),
         role_prompt="你是旅行规划师，只基于给定资料回答。",
-        output_rules="写出 D1/D2；满足预算与同行人约束；标注依据。",
+        output_rules="按用户要求的天数写出 D1、D2…Dn；满足预算与同行人约束；标注依据。",
     )
 
     def s1_answer(question: str) -> str:
@@ -282,7 +286,7 @@ def run_quality(llm, judge_llm, dataset, args) -> list[tuple[str, Any]]:
                 {"role": "system", "content": built.prompt_text},
                 {"role": "user", "content": question},
             ],
-            temperature=0.0,
+            temperature=args.temperature,
         )
 
     reports.append(
@@ -318,6 +322,12 @@ def main(argv: list[str] | None = None) -> int:
         choices=("react", "fc"),
         help="工具调用范式：react 文本协议 / fc 原生 Function Calling",
     )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.0,
+        help="作答采样温度；多次采样建议 0.7，Judge 始终为 0",
+    )
     parser.add_argument("--out", default=".cache/eval_online", help="输出目录")
     args = parser.parse_args(argv)
 
@@ -326,7 +336,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.suites == "all"
         else [item.strip() for item in args.suites.split(",") if item.strip()]
     )
-    llm, llm_manifest = build_llm()
+    llm, llm_manifest = build_llm(args.temperature)
     judge_llm, judge_manifest = build_judge_llm(llm)
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -337,6 +347,7 @@ def main(argv: list[str] | None = None) -> int:
         "offset": args.offset,
         "category": args.category,
         "agent": args.agent,
+        "temperature": args.temperature,
         "max_tool_calls": args.max_tool_calls,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "reports": {},
@@ -365,6 +376,7 @@ def main(argv: list[str] | None = None) -> int:
                     "limit": args.limit,
                     "offset": args.offset,
                     "category": args.category or "all",
+                    "temperature": args.temperature,
                     "timestamp": summary["timestamp"],
                 }
             )

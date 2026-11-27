@@ -26,7 +26,21 @@ _NEGATIONS = (
     "除外",
 )
 
-_LOCAL_NEGATIONS = ("不", "未", "无", "非", "免", "别", "没")
+_LOCAL_NEGATIONS = ("未", "无", "非", "免", "别", "没")
+_LOCAL_NEGATION_RE = re.compile(
+    r"不(?:安排|包含|含|去|游|参观|推荐|选择|计划|前往|建议|想|打算)"
+    r"|未(?:安排|去|游|参观|包含|含)"
+    r"|没(?:有|安排|去)"
+    r"|别去|取消|无需|免去"
+)
+_SUFFIX_NEGATIONS = ("改期", "改天", "取消", "替换", "调整到", "下次", "不去")
+_COMPANION_SYNONYMS = {
+    "父亲": ("父亲", "爸爸", "老人", "长辈"),
+    "母亲": ("母亲", "妈妈", "老人", "长辈"),
+    "父母": ("父母", "双亲", "爸妈", "老人", "长辈"),
+    "孩子": ("孩子", "儿童", "小朋友", "小孩", "亲子"),
+    "老人": ("老人", "长辈", "老年人"),
+}
 
 
 def check_itinerary(
@@ -65,7 +79,11 @@ def check_itinerary(
     companions = [str(item) for item in rules.get("companions", []) or []]
     if companions:
         checks["companions"] = all(
-            _included(source, item) for item in companions
+            any(
+                _included(source, term)
+                for term in _COMPANION_SYNONYMS.get(item, (item,))
+            )
+            for item in companions
         )
 
     return {
@@ -86,10 +104,14 @@ def _occurrences(text: str, item: str):
 
 
 def _included(text: str, item: str) -> bool:
-    """是否被正向提及：只看紧邻的局部否定词，避免跨句误伤。"""
+    """是否被正向提及：只看紧邻的局部否定词，避免跨句误伤。
+
+    “腿脚不便的父亲”中的“不便”是描述，不是否定包含；
+    只有“不安排/不去/未安排/取消”等谓语性否定才算排除。
+    """
     for index in _occurrences(text, item):
         prefix = text[max(0, index - 4) : index]
-        if not any(negation in prefix for negation in _LOCAL_NEGATIONS):
+        if not _LOCAL_NEGATION_RE.search(prefix):
             return True
     return False
 
@@ -147,8 +169,10 @@ def _violated(text: str, item: str) -> bool:
     if item in _WEEKDAYS:
         for match in re.finditer(item, text):
             prefix = text[max(0, match.start() - 15) : match.start()]
-            suffix = text[match.end() : match.end() + 8]
+            suffix = text[match.end() : match.end() + 16]
             if any(negation in prefix for negation in _WEEKDAY_NEGATIONS):
+                continue
+            if any(negation in suffix for negation in _SUFFIX_NEGATIONS):
                 continue
             if re.search(r"(D\d|第[一二三四五六七八九十]+天)", prefix) and any(
                 verb in f"{prefix}{suffix}" for verb in _SCHEDULE_VERBS
@@ -158,12 +182,15 @@ def _violated(text: str, item: str) -> bool:
 
     # 非周几项（如“爬坡”）：只在“行程/安排/参观”句子内判断；
     # 引用资料或背景说明（“登顶需要连续爬坡”）不算安排。
-    for sentence in re.split(r"[。；;！？\n]+", text):
+    for sentence in re.split(r"[。；;！？\n，,]+", text):
         if not re.search(r"(D\d|第[一二三四五六七八九十]+天|安排|行程|参观|游览)", sentence):
             continue
         for match in re.finditer(re.escape(item), sentence):
             prefix = sentence[max(0, match.start() - 40) : match.start()]
+            suffix = sentence[match.end() : match.end() + 16]
             if any(negation in prefix for negation in _NEGATIONS):
+                continue
+            if any(negation in suffix for negation in _SUFFIX_NEGATIONS):
                 continue
             return True
     return False

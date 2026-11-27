@@ -183,14 +183,16 @@ def test_place_guard_can_be_disabled(tmp_path: Path):
 
 
 class _FakeLLM:
-    """记录提示词的假 LLM。"""
+    """记录提示词与温度的假 LLM。"""
 
     def __init__(self) -> None:
         self.messages = []
+        self.temperatures = []
 
     def chat(self, messages, *, temperature=None, json_mode=False, tools=None) -> str:
         """返回固定回答并记录输入。"""
         self.messages = messages
+        self.temperatures.append(temperature)
         return "故宫每天八点三十分开放。依据：资料 1"
 
 
@@ -203,6 +205,10 @@ def test_answer_with_llm(tmp_path: Path, pipeline: RAGPipeline):
     system = llm.messages[0]["content"]
     assert "智游·山水行" in system
     assert "故宫" in llm.messages[1]["content"]
+    assert llm.temperatures[-1] == 0.2
+
+    pipeline.answer("故宫几点开放？", llm=llm, temperature=0.7)
+    assert llm.temperatures[-1] == 0.7
 
 
 def test_fingerprint_mismatch_is_rejected(tmp_path: Path):

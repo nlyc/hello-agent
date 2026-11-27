@@ -36,6 +36,11 @@ def test_place_candidates_detect_unlisted_scenic_spots():
     assert detect_place_candidates("滕王阁下雨天开放吗？", extra=[]) == ["滕王阁"]
     assert detect_place_candidates("郭亮村几月去最好？", extra=[]) == ["郭亮村"]
 
+    # “登”是动词，不应混进地名；应识别为“万寿山”。
+    candidates = detect_place_candidates("颐和园登万寿山累吗？", extra=[])
+    assert "万寿山" in candidates
+    assert all("登" not in item for item in candidates)
+
 
 def test_place_candidates_ignore_generic_words_and_known_places():
     assert detect_place_candidates("周末去爬山怎么样？", extra=[]) == []
