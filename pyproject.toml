@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentflow"
-version = "2.0.3"
+version = "2.1.0"
 description = "自研智能体框架 v2.0：三范式 + 工作流 + 上下文管线（ContextBuilder/Note/Terminal）+ MCP/A2A + 评估闭环"
 readme = "README.md"
 requires-python = ">=3.10"

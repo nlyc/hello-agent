@@ -1,4 +1,4 @@
-# agentflow · 自研智能体框架 v2.0
+# agentflow · 自研智能体框架 v2.1
 
 [![CI](https://github.com/nlyc/hello-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/nlyc/hello-agent/actions/workflows/ci.yml)
 
@@ -8,6 +8,9 @@
 v2.0 在 v1.0 与 M8 记忆/RAG 之上新增：
 **上下文管线**（ContextBuilder + NoteTool + TerminalTool）、**MCP / A2A 协议接入**、**评估基准与对比报告**。
 需求见 [docs/v2.0-requirements.md](docs/v2.0-requirements.md)，评估见 [docs/v2.0-eval-report.md](docs/v2.0-eval-report.md)。
+
+v2.1 进一步把评估基准扩至 **36 工具 / 27 QA / 18 行程**，新增三轮采样、Wilson 区间与稳定性/失败分析，
+见 [docs/v2.1-eval-reliability.md](docs/v2.1-eval-reliability.md)。
 
 需求规划见仓库父目录 `自研框架v1.0-需求规划.md`；本仓库为落地实现。
 

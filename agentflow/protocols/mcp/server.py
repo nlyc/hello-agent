@@ -27,7 +27,7 @@ class MCPServer:
         version: server 版本。
     """
 
-    def __init__(self, name: str = "agentflow-mcp", version: str = "2.0.3") -> None:
+    def __init__(self, name: str = "agentflow-mcp", version: str = "2.1.0") -> None:
         self.name = name
         self.version = version
         self._tools: dict[str, dict[str, Any]] = {}
